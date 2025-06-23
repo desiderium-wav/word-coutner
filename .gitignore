@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.db
+*.pkl
+*.log
+*.env
+*.json
+
+# Jupyter / IPython
+.ipynb_checkpoints/
+
+# Mac & Linux
+.DS_Store
+.env
+
+# Matplotlib temp files
+*.png
+
+# VSCode or IDE stuff
+.vscode/
+.idea/
+
+# Output
+message_cache.db
+badwords_en.txt
