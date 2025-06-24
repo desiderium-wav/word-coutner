@@ -41,7 +41,8 @@ auto_purify_enabled = False
 stalked_user_ids = set()
 
 log_channel_id = int(os.getenv("LOG_CHANNEL_ID"))
-ALLOWED_USER_IDS = {780166243679731722, 1209565744019279974, 1297587845447290974}
+raw_ids = os.getenv("ALLOWED_USER_IDS", "")
+ALLOWED_USER_IDS = {int(uid.strip()) for uid in raw_ids.split(",") if uid.strip().isdigit()}
 
 conn = sqlite3.connect("message_cache.db")
 cursor = conn.cursor()
