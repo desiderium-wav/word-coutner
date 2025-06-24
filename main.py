@@ -27,7 +27,10 @@ def tokenize_text(text):
     text = re.sub(r"@[\w_]+", "", text)
     text = re.sub(r"#\w+", "", text)
     text = re.sub(r"[’']", "", text)
-    return re.findall(r"\b[a-zA-Z]{2,}\b", text.lower())
+    text = text.replace("’", "'")  # normalize smart apostrophes
+    text = re.sub(r"\b([a-z]+)'(m|s|re|ll|ve|d|t)\b", r"\1", text)
+    tokens = [w for w in tokens if w.isalpha()]
+    return re.findall(r"\b[a-z]{2,}\b", text.lower())
 
 STOPWORDS = load_stopwords()
 
