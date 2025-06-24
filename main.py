@@ -17,6 +17,8 @@ def load_stopwords(path="stopwords.txt"):
         print("⚠️ stopwords.txt not found. No stopwords loaded.")
         return set()
 
+stopwords = load_stopwords()
+
 def tokenize_text(text, stopwords=None):
     if stopwords is None:
         stopwords = set()
