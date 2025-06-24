@@ -191,7 +191,7 @@ async def count(ctx, *, word: str):
         user = ctx.guild.get_member(uid)
         name = user.display_name if user else f"User {uid}"
         result_lines.append(f"**{name}** — {count} time(s)")
-    await ctx.send(f"**📊 Here you go your highness, your stupid graph for `{word}`:**\n🔢 Total Mentions: `{total}`\n\n🏆 **Top 10 Users:**\n" + "\n".join(result_lines))
+    await ctx.send(f"**📊 Here you go your highness, your stupid chart for `{word}`:**\n🔢 Total Mentions: `{total}`\n\n🏆 **Top 10 Users:**\n" + "\n".join(result_lines))
 count.shortcut = "c"
 
 @bot.hybrid_command(name="usercount", description="See how often a user said a word.")
