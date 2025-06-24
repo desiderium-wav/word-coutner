@@ -8,6 +8,26 @@ from collections import Counter
 from io import BytesIO
 import matplotlib.pyplot as plt
 
+STOPWORDS = {
+    "i", "me", "my", "myself", "we", "our", "ours", "ourselves",
+    "you", "your", "yours", "yourself", "yourselves",
+    "he", "him", "his", "himself", "she", "her", "hers", "herself",
+    "it", "its", "itself", "they", "them", "their", "theirs", "themselves",
+    "what", "which", "who", "whom", "this", "that", "these", "those",
+    "am", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "having",
+    "do", "does", "did", "doing",
+    "a", "an", "the",
+    "and", "but", "if", "or", "because", "as", "until", "while",
+    "of", "at", "by", "for", "with", "about", "against",
+    "between", "into", "through", "during", "before", "after",
+    "above", "below", "to", "from", "up", "down", "in", "out", "on", "off", "over", "under",
+    "again", "further", "then", "once", "here", "there", "when", "where", "why", "how",
+    "all", "any", "both", "each", "few", "more", "most", "other", "some", "such",
+    "no", "nor", "not", "only", "own", "same", "so", "than", "too", "very",
+    "can", "will", "just", "don", "should", "now"
+}
+
 intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
@@ -15,6 +35,13 @@ intents.guilds = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="s ", intents=intents)
+
+kill_switch_engaged = False
+auto_purify_enabled = False
+stalked_user_ids = set()
+
+log_channel_id = int(os.getenv("LOG_CHANNEL_ID"))
+ALLOWED_USER_IDS = {780166243679731722, 1209565744019279974, 1297587845447290974}
 
 conn = sqlite3.connect("message_cache.db")
 cursor = conn.cursor()
@@ -35,6 +62,9 @@ if os.path.exists("badwords_en.txt"):
     with open("badwords_en.txt", "r", encoding="utf-8") as f:
         TOXIC_WORDS = set(line.strip().lower() for line in f if line.strip())
 
+def is_allowed(ctx):
+    return ctx.author.id in ALLOWED_USER_IDS
+
 # Shortcut registration
 SHORTCUTS = {}
 def register_shortcuts():
@@ -42,8 +72,31 @@ def register_shortcuts():
         if hasattr(command, "shortcut"):
             SHORTCUTS[command.shortcut] = command.name
 
+# Log setup
+async def log_action(message):
+    log_channel = bot.get_channel(log_channel_id)
+    if log_channel:
+        await log_channel.send(message)
+    print(f"[LOG] {message}")
+
+@tasks.loop(minutes=120)
+async def auto_purify():
+    for guild in bot.guilds:
+        for channel in guild.text_channels:
+            if "naked" in channel.name.lower():
+                try:
+                    messages = [msg async for msg in channel.history(limit=100)]
+                    for msg in messages:
+                        if not msg.attachments and msg.author != bot.user:  # 🔁 main_bot → bot
+                            if msg.reactions and sum([r.count for r in msg.reactions]) >= 3:
+                                continue
+                            await msg.delete()
+                            await log_action(f"Auto-deleted message from {msg.author.display_name} in #{channel.name}")
+                except Exception as e:
+                    await log_action(f"Error in auto-purify for #{channel.name}: {e}")
+
 # Background cache loop
-@tasks.loop(minutes=5)
+@tasks.loop(minutes=5) 
 async def background_cache():
     for guild in bot.guilds:
         await cache_channel_history(guild)
@@ -116,8 +169,8 @@ async def on_message(message):
 
 # --- HYBRID COMMANDS BELOW ---
 
-@bot.hybrid_command(name="wordcount", description="Count how often a word was said in the server.")
-async def wordcount(ctx, *, word: str):
+@bot.hybrid_command(name="count", description="Count how often a word was said in the server.")
+async def count(ctx, *, word: str):
     word = word.lower()
     cursor.execute("SELECT author_id, content FROM messages")
     rows = cursor.fetchall()
@@ -129,7 +182,7 @@ async def wordcount(ctx, *, word: str):
             user_counts[author_id] += count
             total += count
     if total == 0:
-        await ctx.send(f"No cached messages contain `{word}`.")
+        await ctx.send(f"Not one soul has deemed `{word}`worth using except you. Loser.")
         return
     top_users = user_counts.most_common(10)
     result_lines = []
@@ -137,34 +190,35 @@ async def wordcount(ctx, *, word: str):
         user = ctx.guild.get_member(uid)
         name = user.display_name if user else f"User {uid}"
         result_lines.append(f"**{name}** — {count} time(s)")
-    await ctx.send(f"**📊 Word Count for `{word}`:**\n🔢 Total Mentions: `{total}`\n\n🏆 **Top 10 Users:**\n" + "\n".join(result_lines))
-wordcount.shortcut = "wc"
+    await ctx.send(f"**📊 Here you go your highness, your stupid graph for `{word}`:**\n🔢 Total Mentions: `{total}`\n\n🏆 **Top 10 Users:**\n" + "\n".join(result_lines))
+count.shortcut = "c"
 
-@bot.hybrid_command(name="userword", description="See how often a user said a word.")
-async def userword(ctx, word: str, member: discord.Member):
+@bot.hybrid_command(name="usercount", description="See how often a user said a word.")
+async def usercount(ctx, word: str, member: discord.Member):
     word = word.lower()
     cursor.execute("SELECT content FROM messages WHERE author_id = ?", (member.id,))
     messages = cursor.fetchall()
     count = sum(msg[0].lower().split().count(word) for msg in messages)
-    await ctx.send(f"**{member.display_name}** has said `{word}` **{count}** time(s).")
-userword.shortcut = "uw"
+    await ctx.send(f"**{member.display_name}** has said `{word}` **{count}** time(s). What a bitch.")
+usercount.shortcut = "uc"
 
-@bot.hybrid_command(name="topwords", description="Show top 10 most used words in the server.")
+@bot.hybrid_command(name="top10", description="Show top 10 most used words in the server.")
 async def topwords(ctx):
     cursor.execute("SELECT content FROM messages")
     rows = cursor.fetchall()
     word_counter = Counter()
     for (content,) in rows:
-        for word in content.lower().translate(str.maketrans('', '', string.punctuation)).split():
-            if word:
+        words = content.lower().translate(str.maketrans('', '', string.punctuation)).split()
+        for word in words:
+            if word and word not in STOPWORDS:
                 word_counter[word] += 1
     top = word_counter.most_common(10)
-    msg = "**📊 Server-Wide Top 10 Words:**\n" + "\n".join([f"`{w}` — {c} time(s)" for w, c in top])
+    msg = "**📊 Top 10 Most Used Words in this Godforsaken Place (Filtered):**\n" + "\n".join([f"`{w}` — {c} time(s)" for w, c in top])
     await ctx.send(msg)
-topwords.shortcut = "top"
+top10.shortcut = "top"
 
-@bot.hybrid_command(name="mytopwords", description="Show your personal top 10 most used words.")
-async def mytopwords(ctx):
+@bot.hybrid_command(name="mylist", description="Show your personal top 10 most used words.")
+async def mylist(ctx):
     user_id = ctx.author.id
     cursor.execute("SELECT content FROM messages WHERE author_id = ?", (user_id,))
     rows = cursor.fetchall()
@@ -173,18 +227,18 @@ async def mytopwords(ctx):
     for (content,) in rows:
         cleaned = content.translate(translator).lower().split()
         for word in cleaned:
-            if word:
+            if word and word not in STOPWORDS:
                 word_counter[word] += 1
     if not word_counter:
-        await ctx.send("You haven't said anything worth counting yet.")
+        await ctx.send("You haven't said anything interesting yet. Have you tried sucking a little less?")
         return
     top_words = word_counter.most_common(10)
     result_lines = [f"`{word}` — {count} time(s)" for word, count in top_words]
-    await ctx.send("**🧠 Your Top 10 Most Used Words:**\n" + "\n".join(result_lines))
-mytopwords.shortcut = "mt"
+    await ctx.send("**🧠 Your Top 10 Words, you fuckin narcissist:**\n" + "\n".join(result_lines))
+mylist.shortcut = "me"
 
-@bot.hybrid_command(name="wordusage_day", description="Hourly usage graph of a word (today).")
-async def wordusage_day(ctx, *, word: str):
+@bot.hybrid_command(name="daily", description="Hourly usage graph of a word (today).")
+async def daily(ctx, *, word: str):
     word = word.lower()
     cursor.execute("SELECT timestamp, content FROM messages")
     rows = cursor.fetchall()
@@ -197,15 +251,15 @@ async def wordusage_day(ctx, *, word: str):
         if word in content.lower().split():
             hour = ts.strftime("%H:00")
             usage_by_hour[hour] = usage_by_hour.get(hour, 0) + 1
-    buf = generate_usage_graph(usage_by_hour, f"Hourly usage of '{word}' today")
+    buf = generate_usage_graph(usage_by_hour, f"Here's your fuckin graph for '{word}' today. Asshole.")
     if buf:
-        await ctx.send(file=discord.File(buf, filename="wordusage_day.png"))
+        await ctx.send(file=discord.File(buf, filename="daily.png"))
     else:
-        await ctx.send(f"No usage of `{word}` found today.")
-wordusage_day.shortcut = "wd"
+        await ctx.send(f"No one said `{word}` today. Bet you feel stupid now, don't you.")
+daily.shortcut = "day"
 
-@bot.hybrid_command(name="wordusage_week", description="Daily usage graph (last 7 days).")
-async def wordusage_week(ctx, *, word: str):
+@bot.hybrid_command(name="thisweek", description="Daily usage graph (last 7 days).")
+async def thisweek(ctx, *, word: str):
     word = word.lower()
     cursor.execute("SELECT timestamp, content FROM messages")
     rows = cursor.fetchall()
@@ -218,15 +272,15 @@ async def wordusage_week(ctx, *, word: str):
         if word in content.lower().split():
             day = ts.strftime("%a %m/%d")
             usage_by_day[day] = usage_by_day.get(day, 0) + 1
-    buf = generate_usage_graph(usage_by_day, f"Daily usage of '{word}' (last 7 days)")
+    buf = generate_usage_graph(usage_by_day, f"Fuck you and your graph for '{word}' (last 7 days)")
     if buf:
-        await ctx.send(file=discord.File(buf, filename="wordusage_week.png"))
+        await ctx.send(file=discord.File(buf, filename="thisweek.png"))
     else:
-        await ctx.send(f"No usage of `{word}` found this week.")
-wordusage_week.shortcut = "ww"
+        await ctx.send(f"Nobody said `{word}` this week. Dumbass.")
+thisweek.shortcut = "week"
 
-@bot.hybrid_command(name="wordusage_all", description="All-time usage graph of a word.")
-async def wordusage_all(ctx, *, word: str):
+@bot.hybrid_command(name="alltime", description="All-time usage graph of a word.")
+async def alltime(ctx, *, word: str):
     word = word.lower()
     cursor.execute("SELECT timestamp, content FROM messages")
     rows = cursor.fetchall()
@@ -237,10 +291,10 @@ async def wordusage_all(ctx, *, word: str):
             usage_by_day[day] = usage_by_day.get(day, 0) + 1
     buf = generate_usage_graph(usage_by_day, f"All-time usage of '{word}'")
     if buf:
-        await ctx.send(file=discord.File(buf, filename="wordusage_all.png"))
+        await ctx.send(file=discord.File(buf, filename="alltime.png"))
     else:
         await ctx.send(f"No usage of `{word}` found in all-time history.")
-wordusage_all.shortcut = "wa"
+alltime.shortcut = "all"
 
 @bot.hybrid_command(name="whoinvented", description="Find the first user to say a word.")
 async def whoinvented(ctx, *, word: str):
@@ -251,13 +305,13 @@ async def whoinvented(ctx, *, word: str):
         if word in content.lower().split():
             user = ctx.guild.get_member(author_id)
             name = user.display_name if user else f"User {author_id}"
-            await ctx.send(f"`{word}` was first said by **{name}** on `{timestamp}`.")
+            await ctx.send(f"`{word}` was first said by **{name}** on `{timestamp}`. What a legend.")
             return
-    await ctx.send(f"No one has said `{word}` yet.")
+    await ctx.send(f"No one has said `{word}` yet. Do it yourself, coward.")
 whoinvented.shortcut = "inv"
 
-@bot.hybrid_command(name="toxicrank", description="Rank users by their use of toxic language.")
-async def toxicrank(ctx):
+@bot.hybrid_command(name="toxicityrank", description="Rank users by their use of toxic language.")
+async def toxicityrank(ctx):
     cursor.execute("SELECT author_id, content FROM messages")
     rows = cursor.fetchall()
     toxicity = Counter()
@@ -270,12 +324,100 @@ async def toxicrank(ctx):
         await ctx.send("This server is suspiciously wholesome.")
         return
     top = toxicity.most_common(10)
-    msg = "**☣️ Top 10 Most Toxic Users:**\n"
+    msg = "**☣️ Top 10 Most Based Users:**\n"
     for uid, count in top:
         user = ctx.guild.get_member(uid)
         name = user.display_name if user else f"User {uid}"
         msg += f"**{name}** — {count} toxic word(s)\n"
     await ctx.send(msg)
-toxicrank.shortcut = "tox"
+toxicity.shortcut = "based"
+
+@bot.hybrid_command(name="kill", description="Kill switch")
+async def kill(ctx):
+    if not is_allowed(ctx):
+        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    global kill_switch_engaged
+    kill_switch_engaged = True
+    await ctx.send("☠️ Kill switch engaged. All bot activity halted.")
+    await log_action("Kill switch was engaged.")
+    await ctx.message.delete()
+kill.shortcut = "k"
+
+@bot.hybrid_command(name="revive", description="Disengage the kill switch")
+async def revive(ctx):
+    if not is_allowed(ctx):
+        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    global kill_switch_engaged
+    kill_switch_engaged = False
+    await ctx.send("🩺 Kill switch disengaged. Bot is operational.")
+    await log_action("Kill switch disengaged.")
+    await ctx.message.delete()
+revive.shortcut = "rv"
+
+@bot.hybrid_command(name="purify", description="Manual start for the purify cycle")
+async def purify(ctx):
+    if not is_allowed(ctx):
+        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    try:
+        deleted = 0
+        async for msg in ctx.channel.history(limit=100):
+            if not msg.attachments and msg.author != bot.user:
+                if msg.reactions and sum([r.count for r in msg.reactions]) >= 3:
+                    continue
+                await msg.delete()
+                deleted += 1
+        await ctx.send(f"🧼 Purified {deleted} messages.", delete_after=5)
+    except Exception as e:
+        await log_action(f"Error in !purify: {e}")
+    await ctx.message.delete()
+purify.shortcut = "pure"
+
+@bot.hybrid_command(name="startpurify", description="Begin the auto-purify cycle")
+async def startpurify(ctx):
+    if not is_allowed(ctx):
+        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    global auto_purify_enabled
+    if not auto_purify.is_running():
+        auto_purify.start()
+        auto_purify_enabled = True
+        await log_action("Auto purify started.")
+        await ctx.send("🔁 Auto purify is now running.", delete_after=5)
+    await ctx.message.delete()
+startpurify.shortcut = "startp"
+
+@bot.hybrid_command(name="stoppurify", description="Stop the auto-purify cycle")
+async def stoppurify(ctx):
+    if not is_allowed(ctx):
+        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    global auto_purify_enabled
+    if auto_purify.is_running():
+        auto_purify.cancel()
+        auto_purify_enabled = False
+        await log_action("Auto purify stopped.")
+        await ctx.send("⛔ Auto purify has been stopped.", delete_after=5)
+    await ctx.message.delete()
+stoppurify.shortcut = "stopp"
+
+@bot.hybrid_command(name="startstalk", description="Stalk a user through time and space")
+@commands.has_permissions(administrator=True)
+async def startstalk(ctx, target: discord.Member):
+    if not (is_allowed(ctx) or ctx.author.guild_permissions.administrator):
+        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    stalked_user_ids.add(target.id)
+    await log_action(f"Started stalking {target.display_name}.")
+    await ctx.send(f"👀 Now stalking {target.display_name}", delete_after=5)
+    await ctx.message.delete()
+startstalk.shortcut = "stalk"
+
+@bot.hybrid_command(name="stopstalk", description="Release your target, they've suffered enough")
+@commands.has_permissions(administrator=True)
+async def stopstalk(ctx, target: discord.Member):
+    if not (is_allowed(ctx) or ctx.author.guild_permissions.administrator):
+        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    stalked_user_ids.discard(target.id)
+    await log_action(f"Stopped stalking {target.display_name}.")
+    await ctx.send(f"🚫 No longer stalking {target.display_name}", delete_after=5)
+    await ctx.message.delete()
+stopstalk.shortcut = "unstalk"
 
 bot.run(os.getenv("DISCORD_TOKEN"))
