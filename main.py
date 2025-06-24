@@ -7,6 +7,7 @@ import string
 from collections import Counter
 from io import BytesIO
 import matplotlib.pyplot as plt
+import re
 
 def load_stopwords(path="stopwords.txt"):
     try:
@@ -15,6 +16,12 @@ def load_stopwords(path="stopwords.txt"):
     except FileNotFoundError:
         print("⚠️ stopwords.txt not found. No stopwords loaded.")
         return set()
+
+def tokenize_text(text):
+    text = re.sub(r"(https?://\S+|www\.\S+)", "", text)
+    text = re.sub(r"@[\w_]+", "", text)                    
+    text = re.sub(r"#\w+", "", text)
+    return re.findall(r"\b[a-zA-Z]{2,}\b", text.lower())
 
 STOPWORDS = load_stopwords()
 
@@ -96,11 +103,13 @@ async def cache_channel_history(guild):
     for channel in guild.text_channels:
         try:
             async for message in channel.history(limit=None, oldest_first=True):
-                if message.author.bot:
-                    continue
+            if message.author.bot:
+                continue
+            if message.content.startswith(('s ', '/')):
+                continue
                 cursor.execute("SELECT 1 FROM messages WHERE message_id = ?", (message.id,))
-                if cursor.fetchone():
-                    continue
+            if cursor.fetchone():
+                continue
                 cursor.execute(
                     "INSERT INTO messages (message_id, channel_id, author_id, content, timestamp) VALUES (?, ?, ?, ?, ?)",
                     (message.id, channel.id, message.author.id, message.content, str(message.created_at))
