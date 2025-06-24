@@ -203,7 +203,7 @@ async def usercount(ctx, word: str, member: discord.Member):
 usercount.shortcut = "uc"
 
 @bot.hybrid_command(name="top10", description="Show top 10 most used words in the server.")
-async def topwords(ctx):
+async def top10(ctx):
     cursor.execute("SELECT content FROM messages")
     rows = cursor.fetchall()
     word_counter = Counter()
@@ -330,7 +330,7 @@ async def toxicityrank(ctx):
         name = user.display_name if user else f"User {uid}"
         msg += f"**{name}** — {count} toxic word(s)\n"
     await ctx.send(msg)
-toxicity.shortcut = "based"
+toxicityrank.shortcut = "based"
 
 @bot.hybrid_command(name="kill", description="Kill switch")
 async def kill(ctx):
