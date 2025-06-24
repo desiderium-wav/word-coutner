@@ -450,7 +450,7 @@ async def initcache(ctx):
     db.commit()
     await ctx.send("✅ Deep cache complete.")
 
-f __name__ == "__main__":
+if __name__ == "__main__":
     token = os.getenv("DISCORD_TOKEN")
     if not token or token.strip() == "" or token.strip().lower() == "none":
         print("❌ DISCORD_TOKEN environment variable is not set.")
