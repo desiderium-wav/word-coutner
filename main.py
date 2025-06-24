@@ -435,6 +435,8 @@ stopstalk.shortcut = "unstalk"
 @bot.hybrid_command(name="initcache", description="One-time deep crawl to cache all messages in server history.")
 @commands.has_permissions(administrator=True)
 async def initcache(ctx):
+    if not (is_allowed(ctx) or ctx.author.guild_permissions.administrator):
+        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     await ctx.send("🧠 Starting deep cache of all server messages. This may take a while...")
     for channel in ctx.guild.text_channels:
         try:
