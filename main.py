@@ -24,7 +24,7 @@ def load_stopwords(path="stopwords.txt"):
 
 stopwords = load_stopwords()
 
-def tokenize_text(text):
+def tokenize_text(text, stopwords=None):
     text = re.sub(r"(https?://\S+|www\.\S+)", "", text)
     text = re.sub(r"@[\w_]+", "", text)
     text = re.sub(r"#\w+", "", text)
