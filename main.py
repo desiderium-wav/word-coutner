@@ -31,7 +31,6 @@ def tokenize_text(text, stopwords=None):
     text = re.sub(r"[’']", "", text)
     text = text.replace("’", "'")  # normalize smart apostrophes
     text = re.sub(r"\b([a-z]+)'(m|s|re|ll|ve|d|t)\b", r"\1", text)
-    tokens = [w for w in tokens if w.isalpha()]
     return re.findall(r"\b[a-z]{2,}\b", text.lower())
 
 intents = discord.Intents.default()
