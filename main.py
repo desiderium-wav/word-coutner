@@ -230,7 +230,7 @@ async def top10(ctx):
     for (content,) in rows:
         words = tokenize_text(content, stopwords)
         for word in words:
-            if word and word not in STOPWORDS:
+            if word and word not in stopwords:
                 word_counter[word] += 1
     top = word_counter.most_common(10)
     msg = "**📊 Top 10 Most Used Words in this Godforsaken Place (Filtered):**\n" + "\n".join([f"`{w}` — {c} time(s)" for w, c in top])
@@ -247,7 +247,7 @@ async def mylist(ctx):
     for (content,) in rows:
         cleaned = tokenize_text(content, stopwords)
         for word in cleaned:
-            if word and word not in STOPWORDS:
+            if word and word not in stopwords:
                 word_counter[word] += 1
     if not word_counter:
         await ctx.send("You haven't said anything interesting yet. Have you tried sucking a little less?")
