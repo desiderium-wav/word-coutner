@@ -11,7 +11,7 @@ import re
 
 def load_stopwords(path="stopwords.txt"):
     try:
-        with open(path, "r") as file:
+        with open(path, "r", encoding="utf-8") as file:
             return {line.strip().lower() for line in file if line.strip()}
     except FileNotFoundError:
         print("⚠️ stopwords.txt not found. No stopwords loaded.")
@@ -19,7 +19,7 @@ def load_stopwords(path="stopwords.txt"):
 
 def tokenize_text(text):
     text = re.sub(r"(https?://\S+|www\.\S+)", "", text)
-    text = re.sub(r"@[\w_]+", "", text)                    
+    text = re.sub(r"@[\w_]+", "", text)
     text = re.sub(r"#\w+", "", text)
     return re.findall(r"\b[a-zA-Z]{2,}\b", text.lower())
 
@@ -37,7 +37,7 @@ kill_switch_engaged = False
 auto_purify_enabled = False
 stalked_user_ids = set()
 
-log_channel_id = int(os.getenv("LOG_CHANNEL_ID"))
+log_channel_id = int(os.getenv("LOG_CHANNEL_ID", "0"))
 raw_ids = os.getenv("ALLOWED_USER_IDS", "")
 ALLOWED_USER_IDS = {int(uid.strip()) for uid in raw_ids.split(",") if uid.strip().isdigit()}
 
@@ -85,7 +85,7 @@ async def auto_purify():
                 try:
                     messages = [msg async for msg in channel.history(limit=100)]
                     for msg in messages:
-                        if not msg.attachments and msg.author != bot.user:  # 🔁 main_bot → bot
+                        if not msg.attachments and msg.author != bot.user:
                             if msg.reactions and sum([r.count for r in msg.reactions]) >= 3:
                                 continue
                             await msg.delete()
@@ -94,7 +94,7 @@ async def auto_purify():
                     await log_action(f"Error in auto-purify for #{channel.name}: {e}")
 
 # Background cache loop
-@tasks.loop(minutes=5) 
+@tasks.loop(minutes=5)
 async def background_cache():
     for guild in bot.guilds:
         await cache_channel_history(guild)
@@ -103,13 +103,13 @@ async def cache_channel_history(guild):
     for channel in guild.text_channels:
         try:
             async for message in channel.history(limit=None, oldest_first=True):
-            if message.author.bot:
-                continue
-            if message.content.startswith(('s ', '/')):
-                continue
+                if message.author.bot:
+                    continue
+                if message.content.startswith(('s ', '/')):
+                    continue
                 cursor.execute("SELECT 1 FROM messages WHERE message_id = ?", (message.id,))
-            if cursor.fetchone():
-                continue
+                if cursor.fetchone():
+                    continue
                 cursor.execute(
                     "INSERT INTO messages (message_id, channel_id, author_id, content, timestamp) VALUES (?, ?, ?, ?, ?)",
                     (message.id, channel.id, message.author.id, message.content, str(message.created_at))
@@ -177,19 +177,19 @@ async def count(ctx, *, word: str):
     total = 0
     user_counts = Counter()
     for author_id, content in rows:
-        count = content.lower().split().count(word)
-        if count > 0:
-            user_counts[author_id] += count
-            total += count
+        count_ = content.lower().split().count(word)
+        if count_ > 0:
+            user_counts[author_id] += count_
+            total += count_
     if total == 0:
-        await ctx.send(f"Not one soul has deemed `{word}`worth using except you. Loser.")
+        await ctx.send(f"Not one soul has deemed `{word}` worth using except you. Loser.")
         return
     top_users = user_counts.most_common(10)
     result_lines = []
-    for uid, count in top_users:
+    for uid, count_ in top_users:
         user = ctx.guild.get_member(uid)
         name = user.display_name if user else f"User {uid}"
-        result_lines.append(f"**{name}** — {count} time(s)")
+        result_lines.append(f"**{name}** — {count_} time(s)")
     await ctx.send(f"**📊 Here you go your highness, your stupid chart for `{word}`:**\n🔢 Total Mentions: `{total}`\n\n🏆 **Top 10 Users:**\n" + "\n".join(result_lines))
 count.shortcut = "c"
 
@@ -198,8 +198,8 @@ async def usercount(ctx, word: str, member: discord.Member):
     word = word.lower()
     cursor.execute("SELECT content FROM messages WHERE author_id = ?", (member.id,))
     messages = cursor.fetchall()
-    count = sum(msg[0].lower().split().count(word) for msg in messages)
-    await ctx.send(f"**{member.display_name}** has said `{word}` **{count}** time(s). What a bitch.")
+    count_ = sum(msg[0].lower().split().count(word) for msg in messages)
+    await ctx.send(f"**{member.display_name}** has said `{word}` **{count_}** time(s). What a bitch.")
 usercount.shortcut = "uc"
 
 @bot.hybrid_command(name="top10", description="Show top 10 most used words in the server.")
@@ -233,7 +233,7 @@ async def mylist(ctx):
         await ctx.send("You haven't said anything interesting yet. Have you tried sucking a little less?")
         return
     top_words = word_counter.most_common(10)
-    result_lines = [f"`{word}` — {count} time(s)" for word, count in top_words]
+    result_lines = [f"`{word}` — {count_} time(s)" for word, count_ in top_words]
     await ctx.send("**🧠 Your Top 10 Words, you fuckin narcissist:**\n" + "\n".join(result_lines))
 mylist.shortcut = "me"
 
@@ -317,18 +317,18 @@ async def toxicityrank(ctx):
     toxicity = Counter()
     for author_id, content in rows:
         words = content.lower().translate(str.maketrans('', '', string.punctuation)).split()
-        count = sum(1 for w in words if w in TOXIC_WORDS)
-        if count > 0:
-            toxicity[author_id] += count
+        count_ = sum(1 for w in words if w in TOXIC_WORDS)
+        if count_ > 0:
+            toxicity[author_id] += count_
     if not toxicity:
         await ctx.send("This server is suspiciously wholesome.")
         return
     top = toxicity.most_common(10)
     msg = "**☣️ Top 10 Most Based Users:**\n"
-    for uid, count in top:
+    for uid, count_ in top:
         user = ctx.guild.get_member(uid)
         name = user.display_name if user else f"User {uid}"
-        msg += f"**{name}** — {count} toxic word(s)\n"
+        msg += f"**{name}** — {count_} toxic word(s)\n"
     await ctx.send(msg)
 toxicityrank.shortcut = "based"
 
@@ -420,4 +420,9 @@ async def stopstalk(ctx, target: discord.Member):
     await ctx.message.delete()
 stopstalk.shortcut = "unstalk"
 
-bot.run(os.getenv("DISCORD_TOKEN"))
+if __name__ == "__main__":
+    token = os.getenv("DISCORD_TOKEN")
+    if not token or token.strip() == "" or token.strip().lower() == "none":
+        print("❌ DISCORD_TOKEN environment variable is not set.")
+    else:
+        bot.run(token)
