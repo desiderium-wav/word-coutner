@@ -9,6 +9,11 @@ from io import BytesIO
 import matplotlib.pyplot as plt
 import re
 
+db = sqlite3.connect("wordcount.db")
+cursor = db.cursor()
+
+cursor.execute("PRAGMA journal_mode=WAL;")
+
 def load_stopwords(path="stopwords.txt"):
     try:
         with open(path, "r", encoding="utf-8") as file:
