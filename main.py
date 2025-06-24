@@ -21,6 +21,7 @@ def tokenize_text(text):
     text = re.sub(r"(https?://\S+|www\.\S+)", "", text)
     text = re.sub(r"@[\w_]+", "", text)
     text = re.sub(r"#\w+", "", text)
+    text = re.sub(r"[’']", "", text)
     return re.findall(r"\b[a-zA-Z]{2,}\b", text.lower())
 
 STOPWORDS = load_stopwords()
