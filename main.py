@@ -17,12 +17,16 @@ def load_stopwords(path="stopwords.txt"):
         print("⚠️ stopwords.txt not found. No stopwords loaded.")
         return set()
 
-def tokenize_text(text):
+def tokenize_text(text, stopwords=None):
+    if stopwords is None:
+        stopwords = set()
+    
     text = re.sub(r"(https?://\S+|www\.\S+)", "", text)
     text = re.sub(r"@[\w_]+", "", text)
     text = re.sub(r"#\w+", "", text)
     text = re.sub(r"[’']", "", text)
-    return re.findall(r"\b[a-zA-Z]{2,}\b", text.lower())
+    tokens = re.findall(r"\b[a-z]{2,}\b", text.lower())
+    return [word for word in tokens if word not in stopwords and not any(char.isdigit() for char in word)]
 
 STOPWORDS = load_stopwords()
 
@@ -178,7 +182,7 @@ async def count(ctx, *, word: str):
     total = 0
     user_counts = Counter()
     for author_id, content in rows:
-        tokens = tokenize_text(content)
+        tokens = tokenize_text(content, stopwords)
         count_ = tokens.count(word)
         if count_ > 0:
             user_counts[author_id] += count_
@@ -200,7 +204,7 @@ async def usercount(ctx, word: str, member: discord.Member):
     word = word.lower()
     cursor.execute("SELECT content FROM messages WHERE author_id = ?", (member.id,))
     messages = cursor.fetchall()
-    count_ = sum(tokenize_text(msg[0]).count(word) for msg in messages)
+    count_ = sum(tokenize_text(msg[0], stopwords).count(word) for msg in messages)
     await ctx.send(f"**{member.display_name}** has said `{word}` **{count_}** time(s). What a bitch.")
 usercount.shortcut = "uc"
 
@@ -210,7 +214,7 @@ async def top10(ctx):
     rows = cursor.fetchall()
     word_counter = Counter()
     for (content,) in rows:
-        words = tokenize_text(content)
+        words = tokenize_text(content, stopwords)
         for word in words:
             if word and word not in STOPWORDS:
                 word_counter[word] += 1
@@ -227,7 +231,7 @@ async def mylist(ctx):
     word_counter = Counter()
     translator = str.maketrans('', '', string.punctuation)
     for (content,) in rows:
-        cleaned = tokenize_text(content)
+        cleaned = tokenize_text(content, stopwords)
         for word in cleaned:
             if word and word not in STOPWORDS:
                 word_counter[word] += 1
@@ -250,7 +254,7 @@ async def daily(ctx, *, word: str):
         ts = datetime.datetime.fromisoformat(timestamp)
         if ts.date() != today:
             continue
-        if word in tokenize_text(content):
+        if word in tokenize_text(content, stopwords):
             hour = ts.strftime("%H:00")
             usage_by_hour[hour] = usage_by_hour.get(hour, 0) + 1
     buf = generate_usage_graph(usage_by_hour, f"Here's your fuckin graph for '{word}' today. Asshole.")
@@ -271,7 +275,7 @@ async def thisweek(ctx, *, word: str):
         ts = datetime.datetime.fromisoformat(timestamp)
         if (today - ts.date()).days > 6:
             continue
-        if word in tokenize_text(content):
+        if word in tokenize_text(content, stopwords):
             day = ts.strftime("%a %m/%d")
             usage_by_day[day] = usage_by_day.get(day, 0) + 1
     buf = generate_usage_graph(usage_by_day, f"Fuck you and your graph for '{word}' (last 7 days)")
@@ -288,7 +292,7 @@ async def alltime(ctx, *, word: str):
     rows = cursor.fetchall()
     usage_by_day = {}
     for timestamp, content in rows:
-        if word in tokenize_text(content):
+        if word in tokenize_text(content, stopwords):
             day = timestamp.split("T")[0]
             usage_by_day[day] = usage_by_day.get(day, 0) + 1
     buf = generate_usage_graph(usage_by_day, f"All-time usage of '{word}'")
@@ -304,7 +308,7 @@ async def whoinvented(ctx, *, word: str):
     cursor.execute("SELECT author_id, timestamp, content FROM messages ORDER BY timestamp ASC")
     rows = cursor.fetchall()
     for author_id, timestamp, content in rows:
-        if word in tokenize_text(content):
+        if word in tokenize_text(content, stopwords):
             user = ctx.guild.get_member(author_id)
             name = user.display_name if user else f"User {author_id}"
             await ctx.send(f"`{word}` was first said by **{name}** on `{timestamp}`. What a legend.")
@@ -318,7 +322,7 @@ async def toxicityrank(ctx):
     rows = cursor.fetchall()
     toxicity = Counter()
     for author_id, content in rows:
-        words = tokenize_text(content)
+        words = tokenize_text(content, stopwords)
         count_ = sum(1 for w in words if w in TOXIC_WORDS)
         if count_ > 0:
             toxicity[author_id] += count_
