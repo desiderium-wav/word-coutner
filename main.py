@@ -17,18 +17,12 @@ def load_stopwords(path="stopwords.txt"):
         print("⚠️ stopwords.txt not found. No stopwords loaded.")
         return set()
 
-stopwords = load_stopwords()
-
-def tokenize_text(text, stopwords=None):
-    if stopwords is None:
-        stopwords = set()
-    
+def tokenize_text(text):
     text = re.sub(r"(https?://\S+|www\.\S+)", "", text)
     text = re.sub(r"@[\w_]+", "", text)
     text = re.sub(r"#\w+", "", text)
     text = re.sub(r"[’']", "", text)
-    tokens = re.findall(r"\b[a-z]{2,}\b", text.lower())
-    return [word for word in tokens if word not in stopwords and not any(char.isdigit() for char in word)]
+    return re.findall(r"\b[a-zA-Z]{2,}\b", text.lower())
 
 STOPWORDS = load_stopwords()
 
@@ -90,7 +84,7 @@ async def auto_purify():
         for channel in guild.text_channels:
             if "naked" in channel.name.lower():
                 try:
-                    messages = [msg async for msg in channel.history(limit=100)]
+                    messages = [msg async for msg in channel.history(limit=None, oldest_first=True)]
                     for msg in messages:
                         if not msg.attachments and msg.author != bot.user:
                             if msg.reactions and sum([r.count for r in msg.reactions]) >= 3:
@@ -104,7 +98,18 @@ async def auto_purify():
 @tasks.loop(minutes=5)
 async def background_cache():
     for guild in bot.guilds:
-        await cache_channel_history(guild)
+        for channel in guild.text_channels:
+            try:
+                async for message in channel.history(limit=100, oldest_first=False):
+                    if message.author.bot:
+                        continue
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO messages (message_id, channel_id, author_id, content, timestamp) VALUES (?, ?, ?, ?, ?)",
+                        (message.id, message.channel.id, message.author.id, message.content, message.created_at.isoformat())
+                    )
+            except Exception as e:
+                print(f"[ERROR] background_cache failed in {channel.name}: {e}")
+    db.commit()
 
 async def cache_channel_history(guild):
     for channel in guild.text_channels:
@@ -161,7 +166,7 @@ async def on_message(message):
     if message.author.bot:
         return
     if message.content.lower().startswith("s "):
-        parts = tokenize_text(message.content[2:])
+        parts = message.content[2:].split()
         if not parts:
             return
         shortcut = parts[0].lower()
@@ -184,8 +189,7 @@ async def count(ctx, *, word: str):
     total = 0
     user_counts = Counter()
     for author_id, content in rows:
-        tokens = tokenize_text(content, stopwords)
-        count_ = tokens.count(word)
+        count_ = content.lower().split().count(word)
         if count_ > 0:
             user_counts[author_id] += count_
             total += count_
@@ -206,7 +210,7 @@ async def usercount(ctx, word: str, member: discord.Member):
     word = word.lower()
     cursor.execute("SELECT content FROM messages WHERE author_id = ?", (member.id,))
     messages = cursor.fetchall()
-    count_ = sum(tokenize_text(msg[0], stopwords).count(word) for msg in messages)
+    count_ = sum(msg[0].lower().split().count(word) for msg in messages)
     await ctx.send(f"**{member.display_name}** has said `{word}` **{count_}** time(s). What a bitch.")
 usercount.shortcut = "uc"
 
@@ -216,7 +220,7 @@ async def top10(ctx):
     rows = cursor.fetchall()
     word_counter = Counter()
     for (content,) in rows:
-        words = tokenize_text(content, stopwords)
+        words = content.lower().translate(str.maketrans('', '', string.punctuation)).split()
         for word in words:
             if word and word not in STOPWORDS:
                 word_counter[word] += 1
@@ -233,7 +237,7 @@ async def mylist(ctx):
     word_counter = Counter()
     translator = str.maketrans('', '', string.punctuation)
     for (content,) in rows:
-        cleaned = tokenize_text(content, stopwords)
+        cleaned = content.translate(translator).lower().split()
         for word in cleaned:
             if word and word not in STOPWORDS:
                 word_counter[word] += 1
@@ -256,7 +260,7 @@ async def daily(ctx, *, word: str):
         ts = datetime.datetime.fromisoformat(timestamp)
         if ts.date() != today:
             continue
-        if word in tokenize_text(content, stopwords):
+        if word in content.lower().split():
             hour = ts.strftime("%H:00")
             usage_by_hour[hour] = usage_by_hour.get(hour, 0) + 1
     buf = generate_usage_graph(usage_by_hour, f"Here's your fuckin graph for '{word}' today. Asshole.")
@@ -277,7 +281,7 @@ async def thisweek(ctx, *, word: str):
         ts = datetime.datetime.fromisoformat(timestamp)
         if (today - ts.date()).days > 6:
             continue
-        if word in tokenize_text(content, stopwords):
+        if word in content.lower().split():
             day = ts.strftime("%a %m/%d")
             usage_by_day[day] = usage_by_day.get(day, 0) + 1
     buf = generate_usage_graph(usage_by_day, f"Fuck you and your graph for '{word}' (last 7 days)")
@@ -294,7 +298,7 @@ async def alltime(ctx, *, word: str):
     rows = cursor.fetchall()
     usage_by_day = {}
     for timestamp, content in rows:
-        if word in tokenize_text(content, stopwords):
+        if word in content.lower().split():
             day = timestamp.split("T")[0]
             usage_by_day[day] = usage_by_day.get(day, 0) + 1
     buf = generate_usage_graph(usage_by_day, f"All-time usage of '{word}'")
@@ -310,7 +314,7 @@ async def whoinvented(ctx, *, word: str):
     cursor.execute("SELECT author_id, timestamp, content FROM messages ORDER BY timestamp ASC")
     rows = cursor.fetchall()
     for author_id, timestamp, content in rows:
-        if word in tokenize_text(content, stopwords):
+        if word in content.lower().split():
             user = ctx.guild.get_member(author_id)
             name = user.display_name if user else f"User {author_id}"
             await ctx.send(f"`{word}` was first said by **{name}** on `{timestamp}`. What a legend.")
@@ -324,7 +328,7 @@ async def toxicityrank(ctx):
     rows = cursor.fetchall()
     toxicity = Counter()
     for author_id, content in rows:
-        words = tokenize_text(content, stopwords)
+        words = content.lower().translate(str.maketrans('', '', string.punctuation)).split()
         count_ = sum(1 for w in words if w in TOXIC_WORDS)
         if count_ > 0:
             toxicity[author_id] += count_
@@ -368,7 +372,7 @@ async def purify(ctx):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     try:
         deleted = 0
-        async for msg in ctx.channel.history(limit=100):
+        async for msg in ctx.channel.history(limit=None, oldest_first=True):
             if not msg.attachments and msg.author != bot.user:
                 if msg.reactions and sum([r.count for r in msg.reactions]) >= 3:
                     continue
@@ -427,8 +431,26 @@ async def stopstalk(ctx, target: discord.Member):
     await ctx.send(f"🚫 No longer stalking {target.display_name}", delete_after=5)
     await ctx.message.delete()
 stopstalk.shortcut = "unstalk"
+        
+@bot.hybrid_command(name="initcache", description="One-time deep crawl to cache all messages in server history.")
+@commands.has_permissions(administrator=True)
+async def initcache(ctx):
+    await ctx.send("🧠 Starting deep cache of all server messages. This may take a while...")
+    for channel in ctx.guild.text_channels:
+        try:
+            async for message in channel.history(limit=None, oldest_first=True):
+                if message.author.bot:
+                    continue
+                cursor.execute(
+                    "INSERT OR IGNORE INTO messages (message_id, channel_id, author_id, content, timestamp) VALUES (?, ?, ?, ?, ?)",
+                    (message.id, message.channel.id, message.author.id, message.content, message.created_at.isoformat())
+                )
+        except Exception as e:
+            print(f"[ERROR] Failed to cache channel {channel.name}: {e}")
+    db.commit()
+    await ctx.send("✅ Deep cache complete.")
 
-if __name__ == "__main__":
+f __name__ == "__main__":
     token = os.getenv("DISCORD_TOKEN")
     if not token or token.strip() == "" or token.strip().lower() == "none":
         print("❌ DISCORD_TOKEN environment variable is not set.")
