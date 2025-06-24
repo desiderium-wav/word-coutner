@@ -22,6 +22,8 @@ def load_stopwords(path="stopwords.txt"):
         print("⚠️ stopwords.txt not found. No stopwords loaded.")
         return set()
 
+stopwords = load_stopwords()
+
 def tokenize_text(text):
     text = re.sub(r"(https?://\S+|www\.\S+)", "", text)
     text = re.sub(r"@[\w_]+", "", text)
@@ -31,8 +33,6 @@ def tokenize_text(text):
     text = re.sub(r"\b([a-z]+)'(m|s|re|ll|ve|d|t)\b", r"\1", text)
     tokens = [w for w in tokens if w.isalpha()]
     return re.findall(r"\b[a-z]{2,}\b", text.lower())
-
-STOPWORDS = load_stopwords()
 
 intents = discord.Intents.default()
 intents.messages = True
