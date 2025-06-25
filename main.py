@@ -68,6 +68,7 @@ stalked_user_ids = set()
 log_channel_id = int(os.getenv("LOG_CHANNEL_ID", "0"))
 raw_ids = os.getenv("ALLOWED_USER_IDS", "")
 ALLOWED_USER_IDS = {int(uid.strip()) for uid in raw_ids.split(",") if uid.strip().isdigit()}
+PURIFY_CHANNEL_IDS = int(os.getenv("PURIFY_CHANNEL_IDS", "0"))
 
 # Toxic word list (auto-load)
 TOXIC_WORDS = set()
