@@ -9,6 +9,8 @@ from io import BytesIO
 import matplotlib.pyplot as plt
 import re
 from discord import app_commands
+import uwuipy
+
 
 db = sqlite3.connect("wordcount.db")
 cursor = db.cursor()
@@ -59,11 +61,14 @@ intents.message_content = True
 intents.guilds = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="s ", intents=intents)
-
 kill_switch_engaged = False
 auto_purify_enabled = False
 stalked_user_ids = set()
+uwu = uwuipy.uwuipy()
+uwulocked_user_ids = set()
+webhook_cache = {}
+
+bot = commands.Bot(command_prefix="s ", intents=intents)
 
 
 log_channel_id = int(os.getenv("LOG_CHANNEL_ID", "0"))
@@ -181,12 +186,37 @@ async def on_ready():
     if not background_cache.is_running():
         background_cache.start()
 
-# Shortcut command handling
 @bot.event
 async def on_message(message):
-    if message.author.bot:
+    if message.author.bot or message.webhook_id is not None:
         return
 
+    if message.author.id in uwulocked_user_ids:
+        try:
+            await message.delete()
+
+            channel = message.channel
+            if channel.id not in webhook_cache:
+                webhooks = await channel.webhooks()
+                webhook = discord.utils.get(webhooks, name="UwuFiend")
+                if webhook is None:
+                   webhook = await channel.create_webhook(name="UwuFiend")
+                webhook_cache[channel.id] = webhook
+            else:
+                webhook = webhook_cache[channel.id]
+
+            uwu_text = uwu.uwuify(message.content).strip()
+            if len(uwu_text) > 2000:
+                uwu_text = uwu_text[:1997] + "..."
+
+            await webhook.send(
+                content=uwu_text,
+                username=message.author.display_name,
+                avatar_url=message.author.display_avatar.url,
+            )
+        except Exception as e:
+            print(f"[UWULOCK ERROR] Failed to uwuify message: {e}")
+  
     # 🔍 Delete messages from stalked users
     if message.author.id in stalked_user_ids:
         try:
@@ -515,6 +545,30 @@ async def initcache(ctx):
             print(f"[ERROR] Failed to cache channel {channel.name}: {e}")
     db.commit()
     await ctx.send("✅ Deep cache complete.")
+
+@bot.hybrid_command(name="uwulock", description="heh.")
+async def uwulock(ctx, member: discord.Member):
+    if not any(role.name in ["Admin", "Moderator"] for role in ctx.author.roles):
+        return await ctx.send("❌ You don't have permission to uwulock people.", delete_after=5)
+
+    if member.id in uwulocked_user_ids:
+        await ctx.send(f"🔒 **{member.display_name}** is already uwulocked.")
+    else:
+        uwulocked_user_ids.add(member.id)
+        await ctx.send(f"💖 **{member.display_name}** is now uwulocked. Prepare for suffering.")
+uwulock.shortcut = "uwu"
+
+@bot.hybrid_command(name="unlock", description="Lift the curse.")
+async def unlock(ctx, member: discord.Member):
+    if not any(role.name in ["Admin", "Moderator"] for role in ctx.author.roles):
+        return await ctx.send("❌ You don't have permission to unuwulock people.", delete_after=5)
+
+    if member.id in uwulocked_user_ids:
+        uwulocked_user_ids.remove(member.id)
+        await ctx.send(f"🔓 **{member.display_name}** has been released from their torment.")
+    else:
+        await ctx.send(f"😇 **{member.display_name}** was not uwulocked.")
+unlock.shortcut = "unuwu"
 
 if __name__ == "__main__":
     token = os.getenv("DISCORD_TOKEN")
