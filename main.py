@@ -94,9 +94,12 @@ async def log_action(message):
 
 @tasks.loop(minutes=120)
 async def auto_purify():
+    raw_channel_ids = os.getenv("PURIFY_CHANNEL_IDS", "")
+    allowed_channel_ids = {int(cid.strip()) for cid in raw_channel_ids.split(",") if cid.strip().isdigit()}
+
     for guild in bot.guilds:
         for channel in guild.text_channels:
-            if "naked" in channel.name.lower():
+            if channel.id in allowed_channel_ids:
                 try:
                     messages = [msg async for msg in channel.history(limit=None, oldest_first=True)]
                     for msg in messages:
@@ -408,25 +411,29 @@ revive.shortcut = "rv"
 
 @bot.hybrid_command(name="purify", description="Manual start for the purify cycle")
 async def purify(ctx):
-    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
+    if not any(role.name in ["Admin", "Moderator"] for role in ctx.author.roles):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     try:
         deleted = 0
-        async for msg in ctx.channel.history(limit=None, oldest_first=True):
-            if not msg.attachments and msg.author != bot.user:
-                if msg.reactions and sum([r.count for r in msg.reactions]) >= 3:
-                    continue
-                await msg.delete()
-                deleted += 1
-        await ctx.send(f"🧼 Purified {deleted} messages.", delete_after=5)
+        if ctx.channel.id in PURIFY_CHANNEL_IDS:
+            async for msg in ctx.channel.history(limit=None, oldest_first=True):
+                if not msg.attachments and msg.author != bot.user:
+                    if msg.reactions and sum(r.count for r in msg.reactions) >= 3:
+                        continue
+                    await msg.delete()
+                    deleted += 1
+            await ctx.send(f"🧼 Purified {deleted} messages.", delete_after=5)
+        else:
+            await ctx.send("❌ This channel is not marked for purification.", delete_after=5)
     except Exception as e:
         await log_action(f"Error in !purify: {e}")
     await ctx.message.delete()
 purify.shortcut = "pure"
 
+
 @bot.hybrid_command(name="startpurify", description="Begin the auto-purify cycle")
 async def startpurify(ctx):
-    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
+    if not any(role.name in ["Admin", "Moderator"] for role in ctx.author.roles):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     global auto_purify_enabled
     if not auto_purify.is_running():
@@ -437,9 +444,10 @@ async def startpurify(ctx):
     await ctx.message.delete()
 startpurify.shortcut = "startp"
 
+
 @bot.hybrid_command(name="stoppurify", description="Stop the auto-purify cycle")
 async def stoppurify(ctx):
-    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
+    if not any(role.name in ["Admin", "Moderator"] for role in ctx.author.roles):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     global auto_purify_enabled
     if auto_purify.is_running():
