@@ -57,8 +57,8 @@ log_channel_id = int(os.getenv("LOG_CHANNEL_ID", "0"))
 raw_ids = os.getenv("ALLOWED_USER_IDS", "")
 ALLOWED_USER_IDS = {int(uid.strip()) for uid in raw_ids.split(",") if uid.strip().isdigit()}
 
-conn = sqlite3.connect("message_cache.db")
-cursor = conn.cursor()
+db = sqlite3.connect("message_cache.db")
+cursor = db.cursor()
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS messages (
     message_id INTEGER PRIMARY KEY,
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS messages (
     timestamp TEXT
 )
 ''')
-conn.commit()
+db.commit()
 
 # Toxic word list (auto-load if available)
 TOXIC_WORDS = set()
