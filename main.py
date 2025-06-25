@@ -186,6 +186,17 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot:
         return
+
+    # 🔍 Delete messages from stalked users
+    if message.author.id in stalked_user_ids:
+        try:
+            await message.delete()
+            await log_action(f"Deleted message from stalked user: {message.author.display_name}")
+        except Exception as e:
+            await log_action(f"Failed to delete stalked user message: {e}")
+        return  # Prevents double-processing
+
+    # 💬 Handle shortcut command system
     if message.content.lower().startswith("s "):
         parts = message.content[2:].split()
         if not parts:
@@ -198,6 +209,7 @@ async def on_message(message):
                 ctx = await bot.get_context(message)
                 await ctx.invoke(command, *args)
                 return
+
     await bot.process_commands(message)
 
 # --- HYBRID COMMANDS BELOW ---
