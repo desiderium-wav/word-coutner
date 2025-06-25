@@ -29,10 +29,17 @@ def tokenize_text(text, stopwords=None):
     text = re.sub(r"(https?://\S+|www\.\S+)", "", text)
     text = re.sub(r"@[\w_]+", "", text)
     text = re.sub(r"#\w+", "", text)
-    text = re.sub(r"[’']", "", text)
-    text = text.replace("’", "'")  # normalize smart apostrophes
-    text = re.sub(r"\b([a-z]+)'(m|s|re|ll|ve|d|t)\b", r"\1", text)
-    return re.findall(r"\b[a-z]{2,}\b", text.lower())
+
+    text = text.replace("’", "'")
+
+    raw_tokens = re.findall(r"\b[\w\*#@!$%]{2,}\b", text.lower())
+
+    tokens = [token for token in raw_tokens if any(c.isalpha() for c in token)]
+
+    if stopwords:
+        tokens = [token for token in tokens if token not in stopwords]
+
+    return tokens
 
 intents = discord.Intents.default()
 intents.messages = True
