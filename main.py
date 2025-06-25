@@ -8,7 +8,7 @@ from collections import Counter
 from io import BytesIO
 import matplotlib.pyplot as plt
 import re
-from discord import apps_command
+from discord import app_commands
 
 db = sqlite3.connect("wordcount.db")
 cursor = db.cursor()
