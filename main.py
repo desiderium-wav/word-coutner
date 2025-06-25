@@ -12,6 +12,16 @@ from discord import app_commands
 
 db = sqlite3.connect("wordcount.db")
 cursor = db.cursor()
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS messages (
+    message_id INTEGER PRIMARY KEY,
+    channel_id INTEGER,
+    author_id INTEGER,
+    content TEXT,
+    timestamp TEXT
+)
+''')
+db.commit()
 
 cursor.execute("PRAGMA journal_mode=WAL;")
 
@@ -57,20 +67,7 @@ log_channel_id = int(os.getenv("LOG_CHANNEL_ID", "0"))
 raw_ids = os.getenv("ALLOWED_USER_IDS", "")
 ALLOWED_USER_IDS = {int(uid.strip()) for uid in raw_ids.split(",") if uid.strip().isdigit()}
 
-db = sqlite3.connect("message_cache.db")
-cursor = db.cursor()
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS messages (
-    message_id INTEGER PRIMARY KEY,
-    channel_id INTEGER,
-    author_id INTEGER,
-    content TEXT,
-    timestamp TEXT
-)
-''')
-db.commit()
-
-# Toxic word list (auto-load if available)
+# Toxic word list (auto-load)
 TOXIC_WORDS = set()
 if os.path.exists("badwords_en.txt"):
     with open("badwords_en.txt", "r", encoding="utf-8") as f:
