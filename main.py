@@ -64,7 +64,7 @@ intents.members = True
 kill_switch_engaged = False
 auto_purify_enabled = False
 stalked_user_ids = set()
-uwu = uwuipy.uwuipy()
+uwu = uwuipy.Uwuipy()
 uwulocked_user_ids = set()
 webhook_cache = {}
 
