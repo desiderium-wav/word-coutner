@@ -386,7 +386,7 @@ toxicityrank.shortcut = "based"
 
 @bot.hybrid_command(name="kill", description="Kill switch")
 async def kill(ctx):
-    if not is_allowed(ctx):
+    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     global kill_switch_engaged
     kill_switch_engaged = True
@@ -397,7 +397,7 @@ kill.shortcut = "k"
 
 @bot.hybrid_command(name="revive", description="Disengage the kill switch")
 async def revive(ctx):
-    if not is_allowed(ctx):
+    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     global kill_switch_engaged
     kill_switch_engaged = False
@@ -408,7 +408,7 @@ revive.shortcut = "rv"
 
 @bot.hybrid_command(name="purify", description="Manual start for the purify cycle")
 async def purify(ctx):
-    if not is_allowed(ctx):
+    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     try:
         deleted = 0
@@ -426,7 +426,7 @@ purify.shortcut = "pure"
 
 @bot.hybrid_command(name="startpurify", description="Begin the auto-purify cycle")
 async def startpurify(ctx):
-    if not is_allowed(ctx):
+    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     global auto_purify_enabled
     if not auto_purify.is_running():
@@ -439,7 +439,7 @@ startpurify.shortcut = "startp"
 
 @bot.hybrid_command(name="stoppurify", description="Stop the auto-purify cycle")
 async def stoppurify(ctx):
-    if not is_allowed(ctx):
+    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     global auto_purify_enabled
     if auto_purify.is_running():
@@ -451,9 +451,9 @@ async def stoppurify(ctx):
 stoppurify.shortcut = "stopp"
 
 @bot.hybrid_command(name="startstalk", description="Stalk a user through time and space")
-@commands.has_permissions(administrator=True)
+@commands.has_any_role('Admin', 'Moderator')
 async def startstalk(ctx, target: discord.Member):
-    if not (is_allowed(ctx) or ctx.author.guild_permissions.administrator):
+    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     stalked_user_ids.add(target.id)
     await log_action(f"Started stalking {target.display_name}.")
@@ -462,9 +462,9 @@ async def startstalk(ctx, target: discord.Member):
 startstalk.shortcut = "stalk"
 
 @bot.hybrid_command(name="stopstalk", description="Release your target, they've suffered enough")
-@commands.has_permissions(administrator=True)
+@commands.has_any_role('Admin', 'Moderator')
 async def stopstalk(ctx, target: discord.Member):
-    if not (is_allowed(ctx) or ctx.author.guild_permissions.administrator):
+    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     stalked_user_ids.discard(target.id)
     await log_action(f"Stopped stalking {target.display_name}.")
@@ -473,9 +473,9 @@ async def stopstalk(ctx, target: discord.Member):
 stopstalk.shortcut = "unstalk"
         
 @bot.hybrid_command(name="initcache", description="One-time deep crawl to cache all messages in server history.")
-@commands.has_permissions(administrator=True)
+@commands.has_any_role('Admin', 'Moderator')
 async def initcache(ctx):
-    if not (is_allowed(ctx) or ctx.author.guild_permissions.administrator):
+    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     await ctx.send("🧠 Starting deep cache of all server messages. This may take a while...")
     for channel in ctx.guild.text_channels:
