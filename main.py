@@ -65,10 +65,13 @@ kill_switch_engaged = False
 auto_purify_enabled = False
 stalked_user_ids = set()
 
+
 log_channel_id = int(os.getenv("LOG_CHANNEL_ID", "0"))
 raw_ids = os.getenv("ALLOWED_USER_IDS", "")
 ALLOWED_USER_IDS = {int(uid.strip()) for uid in raw_ids.split(",") if uid.strip().isdigit()}
-PURIFY_CHANNEL_IDS = int(os.getenv("PURIFY_CHANNEL_IDS", "0"))
+# Load purify channel IDs from environment variable
+raw_channel_ids = os.getenv("PURIFY_CHANNEL_IDS", "")
+PURIFY_CHANNEL_IDS = {int(cid.strip()) for cid in raw_channel_ids.split(",") if cid.strip().isdigit()}
 
 # Toxic word list (auto-load)
 TOXIC_WORDS = set()
@@ -100,7 +103,7 @@ async def auto_purify():
 
     for guild in bot.guilds:
         for channel in guild.text_channels:
-            if channel.id in allowed_channel_ids:
+            if channel.id in PURIFY_CHANNEL_IDS:
                 try:
                     messages = [msg async for msg in channel.history(limit=None, oldest_first=True)]
                     for msg in messages:
