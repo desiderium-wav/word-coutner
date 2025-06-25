@@ -141,7 +141,7 @@ async def cache_channel_history(guild):
                     "INSERT INTO messages (message_id, channel_id, author_id, content, timestamp) VALUES (?, ?, ?, ?, ?)",
                     (message.id, channel.id, message.author.id, message.content, str(message.created_at))
                 )
-                conn.commit()
+                db.commit()
         except Exception:
             pass  # Silent fail
 
