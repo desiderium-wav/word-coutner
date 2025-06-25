@@ -44,6 +44,8 @@ def tokenize_text(text, stopwords=None):
 
     raw_tokens = re.findall(r"\b[\w\*#@!$%]{2,}\b", text.lower())
 
+    raw_tokens = [token for token in raw_tokens if not (token.startswith(":") and token.endswith(":"))]
+
     tokens = [token for token in raw_tokens if any(c.isalpha() for c in token)]
 
     if stopwords:
