@@ -330,8 +330,9 @@ async def whoinvented(ctx, *, word: str):
     await ctx.send(f"No one has said `{word}` yet. Do it yourself, coward.")
 whoinvented.shortcut = "inv"
 
-@bot.hybrid_command(name="toxicityrank", description="Rank users by their use of toxic language.")
-async def toxicityrank(ctx):
+@bot.hybrid_command(name="toxicityrank", description="Shows the top toxic users or a user's most toxic words.")
+@app_commands.describe(user="(Optional) See toxicity ranking for a specific user")
+async def toxicityrank(ctx, user: discord.Member = None):
     cursor.execute("SELECT author_id, content FROM messages")
     rows = cursor.fetchall()
     toxicity = Counter()
