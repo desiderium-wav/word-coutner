@@ -336,22 +336,46 @@ whoinvented.shortcut = "inv"
 async def toxicityrank(ctx, user: discord.Member = None):
     cursor.execute("SELECT author_id, content FROM messages")
     rows = cursor.fetchall()
+    
     toxicity = Counter()
     for author_id, content in rows:
         words = tokenize_text(content, stopwords)
         count_ = sum(1 for w in words if w in TOXIC_WORDS)
         if count_ > 0:
             toxicity[author_id] += count_
+    
     if not toxicity:
         await ctx.send("This server is suspiciously wholesome.")
         return
-    top = toxicity.most_common(10)
-    msg = "**☣️ Top 10 Most Based Users:**\n"
-    for uid, count_ in top:
-        user = ctx.guild.get_member(uid)
-        name = user.display_name if user else f"User {uid}"
-        msg += f"**{name}** — {count_} toxic word(s)\n"
-    await ctx.send(msg)
+
+    if user:
+        user_msgs = [content for uid, content in rows if uid == user.id]
+        user_words = Counter()
+        for msg in user_msgs:
+            words = tokenize_text(msg, stopwords)
+            for w in words:
+                if w in TOXIC_WORDS:
+                    user_words[w] += 1
+        if not user_words:
+            await ctx.send(f"**{user.display_name}** has not said anything toxic (yet).")
+            return
+        sorted_users = [uid for uid, _ in toxicity.most_common()]
+        rank = sorted_users.index(user.id) + 1 if user.id in sorted_users else "Unranked"
+        msg = f"**☣️ Toxicity Report for {user.display_name}**\n"
+        msg += f"**Rank:** {rank}\n"
+        msg += "**Top 10 Toxic Words:**\n"
+        for word, count in user_words.most_common(10):
+            msg += f"`{word}` — {count} time(s)\n"
+        await ctx.send(msg)
+    else:
+        top = toxicity.most_common(10)
+        msg = "**☣️ Top 10 Most Based Users:**\n"
+        for uid, count_ in top:
+            member = ctx.guild.get_member(uid)
+            name = member.display_name if member else f"User {uid}"
+            msg += f"**{name}** — {count_} toxic word(s)\n"
+        await ctx.send(msg)
+
 toxicityrank.shortcut = "based"
 
 @bot.hybrid_command(name="kill", description="Kill switch")
