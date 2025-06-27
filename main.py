@@ -469,6 +469,8 @@ async def purify(ctx):
         ctx.author.id in ALLOWED_USER_IDS
     ):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    
+    try:
         deleted = 0
         if ctx.channel.id in PURIFY_CHANNEL_IDS:
             async for msg in ctx.channel.history(limit=None, oldest_first=True):
@@ -482,9 +484,10 @@ async def purify(ctx):
             await ctx.send("❌ This channel is not marked for purification.", delete_after=5)
     except Exception as e:
         await log_action(f"Error in !purify: {e}")
-    await ctx.message.delete()
-purify.shortcut = "pure"
 
+    await ctx.message.delete()
+
+purify.shortcut = "pure"
 
 @bot.hybrid_command(name="startpurify", description="Begin the auto-purify cycle")
 async def startpurify(ctx):
