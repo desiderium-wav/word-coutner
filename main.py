@@ -74,7 +74,8 @@ bot = commands.Bot(command_prefix="s ", intents=intents)
 log_channel_id = int(os.getenv("LOG_CHANNEL_ID", "0"))
 raw_ids = os.getenv("ALLOWED_USER_IDS", "")
 ALLOWED_USER_IDS = {int(uid.strip()) for uid in raw_ids.split(",") if uid.strip().isdigit()}
-# Load purify channel IDs from environment variable
+raw_role_ids = os.getenv("ALLOWED_ROLE_IDS", "")
+ALLOWED_ROLE_IDS = {int(rid.strip()) for rid in raw_role_ids.split(",") if rid.strip().isdigit()}
 raw_channel_ids = os.getenv("PURIFY_CHANNEL_IDS", "")
 PURIFY_CHANNEL_IDS = {int(cid.strip()) for cid in raw_channel_ids.split(",") if cid.strip().isdigit()}
 
@@ -435,7 +436,10 @@ toxicityrank.shortcut = "based"
 
 @bot.hybrid_command(name="kill", description="Kill switch")
 async def kill(ctx):
-    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
+    if not (
+        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
+        ctx.author.id in ALLOWED_USER_IDS
+    ):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     global kill_switch_engaged
     kill_switch_engaged = True
@@ -446,7 +450,10 @@ kill.shortcut = "k"
 
 @bot.hybrid_command(name="revive", description="Disengage the kill switch")
 async def revive(ctx):
-    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
+    if not (
+        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
+        ctx.author.id in ALLOWED_USER_IDS
+    ):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     global kill_switch_engaged
     kill_switch_engaged = False
@@ -457,9 +464,11 @@ revive.shortcut = "rv"
 
 @bot.hybrid_command(name="purify", description="Manual start for the purify cycle")
 async def purify(ctx):
-    if not any(role.name in ["Admin", "Moderator"] for role in ctx.author.roles):
+    if not (
+        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
+        ctx.author.id in ALLOWED_USER_IDS
+    ):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
-    try:
         deleted = 0
         if ctx.channel.id in PURIFY_CHANNEL_IDS:
             async for msg in ctx.channel.history(limit=None, oldest_first=True):
@@ -479,7 +488,10 @@ purify.shortcut = "pure"
 
 @bot.hybrid_command(name="startpurify", description="Begin the auto-purify cycle")
 async def startpurify(ctx):
-    if not any(role.name in ["Admin", "Moderator"] for role in ctx.author.roles):
+    if not (
+        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
+        ctx.author.id in ALLOWED_USER_IDS
+    ):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     global auto_purify_enabled
     if not auto_purify.is_running():
@@ -493,7 +505,10 @@ startpurify.shortcut = "startp"
 
 @bot.hybrid_command(name="stoppurify", description="Stop the auto-purify cycle")
 async def stoppurify(ctx):
-    if not any(role.name in ["Admin", "Moderator"] for role in ctx.author.roles):
+    if not (
+        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
+        ctx.author.id in ALLOWED_USER_IDS
+    ):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     global auto_purify_enabled
     if auto_purify.is_running():
@@ -505,9 +520,11 @@ async def stoppurify(ctx):
 stoppurify.shortcut = "stopp"
 
 @bot.hybrid_command(name="startstalk", description="Stalk a user through time and space")
-@commands.has_any_role('Admin', 'Moderator')
 async def startstalk(ctx, target: discord.Member):
-    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
+    if not (
+        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
+        ctx.author.id in ALLOWED_USER_IDS
+    ):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     stalked_user_ids.add(target.id)
     await log_action(f"Started stalking {target.display_name}.")
@@ -516,9 +533,11 @@ async def startstalk(ctx, target: discord.Member):
 startstalk.shortcut = "stalk"
 
 @bot.hybrid_command(name="stopstalk", description="Release your target, they've suffered enough")
-@commands.has_any_role('Admin', 'Moderator')
 async def stopstalk(ctx, target: discord.Member):
-    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
+    if not (
+        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
+        ctx.author.id in ALLOWED_USER_IDS
+    ):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     stalked_user_ids.discard(target.id)
     await log_action(f"Stopped stalking {target.display_name}.")
@@ -527,9 +546,11 @@ async def stopstalk(ctx, target: discord.Member):
 stopstalk.shortcut = "unstalk"
         
 @bot.hybrid_command(name="initcache", description="One-time deep crawl to cache all messages in server history.")
-@commands.has_any_role('Admin', 'Moderator')
 async def initcache(ctx):
-    if not any(role.name in ['Admin', 'Moderator'] for role in ctx.author.roles):
+    if not (
+        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
+        ctx.author.id in ALLOWED_USER_IDS
+    ):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
     await ctx.send("🧠 Starting deep cache of all server messages. This may take a while...")
     for channel in ctx.guild.text_channels:
@@ -548,8 +569,11 @@ async def initcache(ctx):
 
 @bot.hybrid_command(name="uwulock", description="heh.")
 async def uwulock(ctx, member: discord.Member):
-    if not any(role.name in ["Admin", "Moderator"] for role in ctx.author.roles):
-        return await ctx.send("❌ You don't have permission to uwulock people.", delete_after=5)
+    if not (
+        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
+        ctx.author.id in ALLOWED_USER_IDS
+    ):
+        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
 
     if member.id in uwulocked_user_ids:
         await ctx.send(f"🔒 **{member.display_name}** is already uwulocked.")
@@ -560,8 +584,11 @@ uwulock.shortcut = "uwu"
 
 @bot.hybrid_command(name="unlock", description="Lift the curse.")
 async def unlock(ctx, member: discord.Member):
-    if not any(role.name in ["Admin", "Moderator"] for role in ctx.author.roles):
-        return await ctx.send("❌ You don't have permission to unuwulock people.", delete_after=5)
+    if not (
+        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
+        ctx.author.id in ALLOWED_USER_IDS
+    ):
+        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
 
     if member.id in uwulocked_user_ids:
         uwulocked_user_ids.remove(member.id)
