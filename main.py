@@ -79,7 +79,6 @@ ALLOWED_ROLE_IDS = {int(rid.strip()) for rid in raw_role_ids.split(",") if rid.s
 raw_channel_ids = os.getenv("PURIFY_CHANNEL_IDS", "")
 PURIFY_CHANNEL_IDS = {int(cid.strip()) for cid in raw_channel_ids.split(",") if cid.strip().isdigit()}
 
-# Toxic word list (auto-load)
 TOXIC_WORDS = set()
 if os.path.exists("badwords_en.txt"):
     with open("badwords_en.txt", "r", encoding="utf-8") as f:
@@ -88,14 +87,12 @@ if os.path.exists("badwords_en.txt"):
 def is_allowed(ctx):
     return ctx.author.id in ALLOWED_USER_IDS
 
-# Shortcut registration
 SHORTCUTS = {}
 def register_shortcuts():
     for command in bot.commands:
         if hasattr(command, "shortcut"):
             SHORTCUTS[command.shortcut] = command.name
 
-# Log setup
 async def log_action(message):
     log_channel = bot.get_channel(log_channel_id)
     if log_channel:
@@ -121,7 +118,6 @@ async def auto_purify():
                 except Exception as e:
                     await log_action(f"Error in auto-purify for #{channel.name}: {e}")
 
-# Background cache loop
 @tasks.loop(minutes=5)
 async def background_cache():
     for guild in bot.guilds:
@@ -155,9 +151,8 @@ async def cache_channel_history(guild):
                 )
                 db.commit()
         except Exception:
-            pass  # Silent fail
+            pass  
 
-# Word usage graph helper
 def generate_usage_graph(data_dict, title):
     if not data_dict:
         return None
@@ -174,7 +169,6 @@ def generate_usage_graph(data_dict, title):
     plt.close()
     return buf
 
-# On ready: sync slash + register shortcuts
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user.name}")
@@ -218,16 +212,13 @@ async def on_message(message):
         except Exception as e:
             print(f"[UWULOCK ERROR] Failed to uwuify message: {e}")
   
-    # 🔍 Delete messages from stalked users
     if message.author.id in stalked_user_ids:
         try:
             await message.delete()
             await log_action(f"Deleted message from stalked user: {message.author.display_name}")
         except Exception as e:
             await log_action(f"Failed to delete stalked user message: {e}")
-        return  # Prevents double-processing
-
-    # 💬 Handle shortcut command system
+        return 
     if message.content.lower().startswith("s "):
         parts = message.content[2:].split()
         if not parts:
@@ -243,7 +234,6 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# --- HYBRID COMMANDS BELOW ---
 
 @bot.hybrid_command(name="count", description="Count how often a word was said in the server.")
 async def count(ctx, *, word: str):
