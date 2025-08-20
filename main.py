@@ -547,15 +547,17 @@ async def initcache(ctx):
     ):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
 
-    # Acknowledge command so slash doesn't timeout
-    await ctx.defer()
-    await ctx.followup.send("🧠 Starting (or resuming) deep cache of all server messages. This may take a while...")
+    # Acknowledge the interaction so slash doesn’t timeout
+    await ctx.defer(ephemeral=False)
+
+    # First visible message
+    await ctx.channel.send("🧠 Starting (or resuming) deep cache of all server messages. This may take a while...")
 
     total_cached = 0
     progress_update_interval = 500
     batch = []
 
-    # Make sure we have a table to track progress
+    # Ensure progress table exists
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS cache_progress (
             channel_id INTEGER PRIMARY KEY,
@@ -566,12 +568,10 @@ async def initcache(ctx):
 
     for channel in ctx.guild.text_channels:
         try:
-            # Ensure bot can read history
             if not channel.permissions_for(ctx.guild.me).read_message_history:
                 print(f"[SKIP] No permission to read {channel.name}")
                 continue
 
-            # Find where we left off
             cursor.execute("SELECT last_message_id FROM cache_progress WHERE channel_id = ?", (channel.id,))
             row = cursor.fetchone()
             last_message_id = row[0] if row else None
@@ -601,7 +601,6 @@ async def initcache(ctx):
                     db.commit()
                     batch.clear()
 
-                    # Save progress
                     cursor.execute(
                         "INSERT OR REPLACE INTO cache_progress (channel_id, last_message_id) VALUES (?, ?)",
                         (channel.id, message.id)
@@ -609,9 +608,8 @@ async def initcache(ctx):
                     db.commit()
 
                 if total_cached % progress_update_interval == 0:
-                    await ctx.followup.send(f"📊 Cached {total_cached} messages so far...")
+                    await ctx.channel.send(f"📊 Cached {total_cached} messages so far...")
 
-            # After finishing the channel, store the final message ID
             if batch:
                 cursor.executemany(
                     "INSERT OR IGNORE INTO messages (message_id, channel_id, author_id, content, timestamp) VALUES (?, ?, ?, ?, ?)",
@@ -628,9 +626,7 @@ async def initcache(ctx):
         except Exception as e:
             print(f"[ERROR] Failed to cache channel {channel.name}: {e}")
 
-    await ctx.followup.send(f"✅ Deep cache complete (resumable). Cached {total_cached} new messages.")
-
-
+    await ctx.channel.send(f"✅ Deep cache complete (resumable). Cached {total_cached} new messages.")
 
 @bot.hybrid_command(name="uwulock", description="heh.")
 async def uwulock(ctx, member: discord.Member):
