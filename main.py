@@ -538,33 +538,20 @@ async def stopstalk(ctx, target: discord.Member):
     await ctx.message.delete()
 stopstalk.shortcut = "unstalk"
         
-@bot.hybrid_command(name="initcache", description="One-time deep crawl to cache all messages in server history.")
+@bot.hybrid_command(name="initcache", description="Deep crawl to cache ALL messages in server history (fresh).")
 async def initcache(ctx):
-    # Permissions check
     if not (
         any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or
         ctx.author.id in ALLOWED_USER_IDS
     ):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
 
-    # Acknowledge the interaction so slash doesn’t timeout
     await ctx.defer(ephemeral=False)
-
-    # First visible message
-    await ctx.channel.send("🧠 Starting (or resuming) deep cache of all server messages. This may take a while...")
+    await ctx.channel.send("🧠 Starting full deep cache of ALL server messages. This may take a while...")
 
     total_cached = 0
-    progress_update_interval = 500
+    progress_update_interval = 1000
     batch = []
-
-    # Ensure progress table exists
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS cache_progress (
-            channel_id INTEGER PRIMARY KEY,
-            last_message_id INTEGER
-        )
-    """)
-    db.commit()
 
     for channel in ctx.guild.text_channels:
         try:
@@ -572,15 +559,7 @@ async def initcache(ctx):
                 print(f"[SKIP] No permission to read {channel.name}")
                 continue
 
-            cursor.execute("SELECT last_message_id FROM cache_progress WHERE channel_id = ?", (channel.id,))
-            row = cursor.fetchone()
-            last_message_id = row[0] if row else None
-
-            kwargs = {"limit": None, "oldest_first": True}
-            if last_message_id:
-                kwargs["after"] = discord.Object(id=last_message_id)
-
-            async for message in channel.history(**kwargs):
+            async for message in channel.history(limit=None, oldest_first=True):
                 if message.author.bot:
                     continue
 
@@ -601,24 +580,14 @@ async def initcache(ctx):
                     db.commit()
                     batch.clear()
 
-                    cursor.execute(
-                        "INSERT OR REPLACE INTO cache_progress (channel_id, last_message_id) VALUES (?, ?)",
-                        (channel.id, message.id)
-                    )
-                    db.commit()
-
                 if total_cached % progress_update_interval == 0:
                     await ctx.channel.send(f"📊 Cached {total_cached} messages so far...")
 
+            # Flush leftover for this channel
             if batch:
                 cursor.executemany(
                     "INSERT OR IGNORE INTO messages (message_id, channel_id, author_id, content, timestamp) VALUES (?, ?, ?, ?, ?)",
                     batch
-                )
-                db.commit()
-                cursor.execute(
-                    "INSERT OR REPLACE INTO cache_progress (channel_id, last_message_id) VALUES (?, ?)",
-                    (channel.id, batch[-1][0])
                 )
                 db.commit()
                 batch.clear()
@@ -626,7 +595,7 @@ async def initcache(ctx):
         except Exception as e:
             print(f"[ERROR] Failed to cache channel {channel.name}: {e}")
 
-    await ctx.channel.send(f"✅ Deep cache complete (resumable). Cached {total_cached} new messages.")
+    await ctx.channel.send(f"✅ Deep cache complete. Cached {total_cached} messages total.")
 
 @bot.hybrid_command(name="uwulock", description="heh.")
 async def uwulock(ctx, member: discord.Member):
