@@ -71,7 +71,7 @@ webhook_cache = {}
 bot = commands.Bot(command_prefix="s ", intents=intents)
 
 
-log_channel_id = int(os.getenv("LOG_CHANNEL_ID", "0"))
+log_channel_id = int(os.getenv("LOG_CHANNEL_ID", ""))
 raw_ids = os.getenv("ALLOWED_USER_IDS", "")
 ALLOWED_USER_IDS = {int(uid.strip()) for uid in raw_ids.split(",") if uid.strip().isdigit()}
 raw_role_ids = os.getenv("ALLOWED_ROLE_IDS", "")
