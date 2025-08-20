@@ -540,25 +540,94 @@ stopstalk.shortcut = "unstalk"
         
 @bot.hybrid_command(name="initcache", description="One-time deep crawl to cache all messages in server history.")
 async def initcache(ctx):
+    # Permissions check
     if not (
-        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
+        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or
         ctx.author.id in ALLOWED_USER_IDS
     ):
         return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
-    await ctx.send("🧠 Starting deep cache of all server messages. This may take a while...")
+
+    await ctx.send("🧠 Starting (or resuming) deep cache of all server messages. This may take a while...")
+
+    total_cached = 0
+    progress_update_interval = 500
+    batch = []
+
+    # Make sure we have a table to track progress
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cache_progress (
+            channel_id INTEGER PRIMARY KEY,
+            last_message_id INTEGER
+        )
+    """)
+    db.commit()
+
     for channel in ctx.guild.text_channels:
         try:
-            async for message in channel.history(limit=None, oldest_first=True):
+            # Ensure bot can read history
+            if not channel.permissions_for(ctx.guild.me).read_message_history:
+                print(f"[SKIP] No permission to read {channel.name}")
+                continue
+
+            # Find where we left off
+            cursor.execute("SELECT last_message_id FROM cache_progress WHERE channel_id = ?", (channel.id,))
+            row = cursor.fetchone()
+            last_message_id = row[0] if row else None
+
+            kwargs = {"limit": None, "oldest_first": True}
+            if last_message_id:
+                kwargs["after"] = discord.Object(id=last_message_id)
+
+            async for message in channel.history(**kwargs):
                 if message.author.bot:
                     continue
-                cursor.execute(
+
+                batch.append((
+                    message.id,
+                    message.channel.id,
+                    message.author.id,
+                    message.content,
+                    message.created_at.isoformat()
+                ))
+                total_cached += 1
+
+                if len(batch) >= 500:
+                    cursor.executemany(
+                        "INSERT OR IGNORE INTO messages (message_id, channel_id, author_id, content, timestamp) VALUES (?, ?, ?, ?, ?)",
+                        batch
+                    )
+                    db.commit()
+                    batch.clear()
+
+                    # Save progress
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO cache_progress (channel_id, last_message_id) VALUES (?, ?)",
+                        (channel.id, message.id)
+                    )
+                    db.commit()
+
+                if total_cached % progress_update_interval == 0:
+                    await ctx.send(f"📊 Cached {total_cached} messages so far...")
+
+            # After finishing the channel, store the final message ID
+            if batch:
+                cursor.executemany(
                     "INSERT OR IGNORE INTO messages (message_id, channel_id, author_id, content, timestamp) VALUES (?, ?, ?, ?, ?)",
-                    (message.id, message.channel.id, message.author.id, message.content, message.created_at.isoformat())
+                    batch
                 )
+                db.commit()
+                cursor.execute(
+                    "INSERT OR REPLACE INTO cache_progress (channel_id, last_message_id) VALUES (?, ?)",
+                    (channel.id, batch[-1][0])
+                )
+                db.commit()
+                batch.clear()
+
         except Exception as e:
             print(f"[ERROR] Failed to cache channel {channel.name}: {e}")
-    db.commit()
-    await ctx.send("✅ Deep cache complete.")
+
+    await ctx.send(f"✅ Deep cache complete (resumable). Cached {total_cached} new messages.")
+
 
 @bot.hybrid_command(name="uwulock", description="heh.")
 async def uwulock(ctx, member: discord.Member):
