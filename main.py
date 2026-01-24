@@ -94,10 +94,8 @@ _raw_log_id = os.getenv("LOG_CHANNEL_ID")
 if _raw_log_id and _raw_log_id.isdigit():
     log_channel_id = int(_raw_log_id)
 
-raw_ids = os.getenv("ALLOWED_USER_IDS", "")
-ALLOWED_USER_IDS = {int(uid.strip()) for uid in raw_ids.split(",") if uid.strip().isdigit()}
-raw_role_ids = os.getenv("ALLOWED_ROLE_IDS", "")
-ALLOWED_ROLE_IDS = {int(rid.strip()) for rid in raw_role_ids.split(",") if rid.strip().isdigit()}
+# Removed ALLOWED_USER_IDS / ALLOWED_ROLE_IDS. Use admin checks instead.
+
 raw_channel_ids = os.getenv("PURIFY_CHANNEL_IDS", "")
 PURIFY_CHANNEL_IDS = {int(cid.strip()) for cid in raw_channel_ids.split(",") if cid.strip().isdigit()}
 
@@ -105,9 +103,6 @@ TOXIC_WORDS = set()
 if os.path.exists("badwords_en.txt"):
     with open("badwords_en.txt", "r", encoding="utf-8") as f:
         TOXIC_WORDS = set(line.strip().lower() for line in f if line.strip())
-
-def is_allowed(ctx):
-    return ctx.author.id in ALLOWED_USER_IDS
 
 SHORTCUTS = {}
 def register_shortcuts():
@@ -149,7 +144,6 @@ async def auto_purify():
         if not channel or not isinstance(channel, discord.TextChannel):
             continue
         try:
-            # We walk the history and delete non-image messages that don't have >=3 reactions
             async for msg in channel.history(limit=None, oldest_first=True):
                 if msg.author == bot.user:
                     continue
@@ -162,7 +156,6 @@ async def auto_purify():
                     await msg.delete()
                     await log_action(f"Auto-deleted message from {msg.author.display_name} in #{channel.name}")
                 except discord.HTTPException as e:
-                    # If rate-limited or forbidden, log and break out to avoid hammering
                     await log_action(f"Failed deleting message in #{channel.name}: {e}")
                     await asyncio.sleep(1)
         except Exception as e:
@@ -177,26 +170,21 @@ async def background_cache():
             if not channel.permissions_for(guild.me).read_message_history:
                 continue
             try:
-                # fetch recent N messages (batched) to keep DB fairly fresh
-                # use relatively small chunk to avoid long blocking calls
                 async for message in channel.history(limit=500, oldest_first=False):
-                    # skip bots and webhooks and DMs
                     if message.author.bot or message.webhook_id is not None or message.guild is None:
                         continue
-                    # insert with guild_id
                     try:
                         cursor.execute(
                             "INSERT OR IGNORE INTO messages (message_id, channel_id, author_id, content, timestamp, guild_id) VALUES (?, ?, ?, ?, ?, ?)",
                             (message.id, message.channel.id, message.author.id, message.content or "", message.created_at.isoformat(), message.guild.id)
                         )
                     except Exception:
-                        # some messages might have unsupported characters; fallback to repr of content
                         cursor.execute(
                             "INSERT OR IGNORE INTO messages (message_id, channel_id, author_id, content, timestamp, guild_id) VALUES (?, ?, ?, ?, ?, ?)",
                             (message.id, message.channel.id, message.author.id, (message.content or "").encode("utf-8", errors="replace").decode("utf-8"), message.created_at.isoformat(), message.guild.id)
                         )
                 db.commit()
-                await asyncio.sleep(0)  # yield
+                await asyncio.sleep(0)
             except Exception as e:
                 print(f"[ERROR] background_cache failed in {channel.name if channel else 'unknown'}: {e}")
 
@@ -211,8 +199,8 @@ async def cache_channel_history(guild: discord.Guild):
             async for message in channel.history(limit=None, oldest_first=True):
                 if message.author.bot or message.webhook_id is not None or message.guild is None:
                     continue
-                # Skip bot commands/special messages if you want (retained previous behavior)
-                if message.content.startswith(('s ', '/')):
+                if message.content and message.content.startswith(('s ', '/')):
+                    # keep previous behavior to ignore bot commands if present
                     continue
                 batch.append((
                     message.id,
@@ -321,7 +309,7 @@ async def on_message(message):
             await log_action(f"Failed to delete stalked user message: {e}")
         return 
 
-    if message.content.lower().startswith("s "):
+    if message.content and message.content.lower().startswith("s "):
         parts = message.content[2:].split()
         if not parts:
             return
@@ -340,6 +328,8 @@ async def on_message(message):
 @bot.hybrid_command(name="count", description="Count how often a word was said in the server.")
 async def count(ctx, *, word: str):
     word = word.lower()
+    if ctx.guild is None:
+        return await ctx.send("This command must be used in a server.")
     cursor.execute("SELECT author_id, content FROM messages WHERE guild_id = ?", (ctx.guild.id,))
     rows = cursor.fetchall()
     total = 0
@@ -365,6 +355,8 @@ count.shortcut = "c"
 @bot.hybrid_command(name="usercount", description="See how often a user said a word.")
 async def usercount(ctx, word: str, member: discord.Member):
     word = word.lower()
+    if ctx.guild is None:
+        return await ctx.send("This command must be used in a server.")
     cursor.execute("SELECT content FROM messages WHERE author_id = ? AND guild_id = ?", (member.id, ctx.guild.id))
     messages = cursor.fetchall()
     count_ = sum(tokenize_text(msg[0] or "", stopwords).count(word) for msg in messages)
@@ -373,6 +365,8 @@ usercount.shortcut = "uc"
 
 @bot.hybrid_command(name="top10", description="Show top 10 most used words in the server.")
 async def top10(ctx):
+    if ctx.guild is None:
+        return await ctx.send("This command must be used in a server.")
     cursor.execute("SELECT content FROM messages WHERE guild_id = ?", (ctx.guild.id,))
     rows = cursor.fetchall()
     word_counter = Counter()
@@ -388,6 +382,8 @@ top10.shortcut = "top"
 
 @bot.hybrid_command(name="mylist", description="Show your personal top 10 most used words.")
 async def mylist(ctx):
+    if ctx.guild is None:
+        return await ctx.send("This command must be used in a server.")
     user_id = ctx.author.id
     cursor.execute("SELECT content FROM messages WHERE author_id = ? AND guild_id = ?", (user_id, ctx.guild.id))
     rows = cursor.fetchall()
@@ -408,6 +404,8 @@ mylist.shortcut = "me"
 @bot.hybrid_command(name="daily", description="Hourly usage graph of a word (today).")
 async def daily(ctx, *, word: str):
     word = word.lower()
+    if ctx.guild is None:
+        return await ctx.send("This command must be used in a server.")
     cursor.execute("SELECT timestamp, content FROM messages WHERE guild_id = ?", (ctx.guild.id,))
     rows = cursor.fetchall()
     today = datetime.datetime.utcnow().date()
@@ -432,6 +430,8 @@ daily.shortcut = "day"
 @bot.hybrid_command(name="thisweek", description="Daily usage graph (last 7 days).")
 async def thisweek(ctx, *, word: str):
     word = word.lower()
+    if ctx.guild is None:
+        return await ctx.send("This command must be used in a server.")
     cursor.execute("SELECT timestamp, content FROM messages WHERE guild_id = ?", (ctx.guild.id,))
     rows = cursor.fetchall()
     today = datetime.datetime.utcnow().date()
@@ -456,6 +456,8 @@ thisweek.shortcut = "week"
 @bot.hybrid_command(name="alltime", description="All-time usage graph of a word.")
 async def alltime(ctx, *, word: str):
     word = word.lower()
+    if ctx.guild is None:
+        return await ctx.send("This command must be used in a server.")
     cursor.execute("SELECT timestamp, content FROM messages WHERE guild_id = ?", (ctx.guild.id,))
     rows = cursor.fetchall()
     usage_by_day = {}
@@ -474,6 +476,8 @@ alltime.shortcut = "all"
 @bot.hybrid_command(name="whoinvented", description="Find the first user to say a word.")
 async def whoinvented(ctx, *, word: str):
     word = word.lower()
+    if ctx.guild is None:
+        return await ctx.send("This command must be used in a server.")
     cursor.execute("SELECT author_id, timestamp, content FROM messages WHERE guild_id = ? ORDER BY timestamp ASC", (ctx.guild.id,))
     rows = cursor.fetchall()
     for author_id, timestamp, content in rows:
@@ -488,6 +492,8 @@ whoinvented.shortcut = "inv"
 @bot.hybrid_command(name="toxicityrank", description="Shows the top toxic users or a user's most toxic words.")
 @app_commands.describe(user="(Optional) See toxicity ranking for a specific user")
 async def toxicityrank(ctx, user: discord.Member = None):
+    if ctx.guild is None:
+        return await ctx.send("This command must be used in a server.")
     cursor.execute("SELECT author_id, content FROM messages WHERE guild_id = ?", (ctx.guild.id,))
     rows = cursor.fetchall()
     
@@ -532,14 +538,21 @@ async def toxicityrank(ctx, user: discord.Member = None):
 
 toxicityrank.shortcut = "based"
 
-# --- Admin commands, purify, and cache commands ---
+# --- Admin check helper ---
+def is_guild_admin(ctx):
+    # ctx may be Interaction or Context; both have author attribute
+    author = getattr(ctx, "author", None)
+    guild = getattr(ctx, "guild", None)
+    if not author or not guild:
+        return False
+    perms = author.guild_permissions
+    return perms.administrator
+
+# --- Admin commands, purify, and cache commands (now admin-only via permissions) ---
 @bot.hybrid_command(name="kill", description="Kill switch")
 async def kill(ctx):
-    if not (
-        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
-        ctx.author.id in ALLOWED_USER_IDS
-    ):
-        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    if not is_guild_admin(ctx):
+        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
     global kill_switch_engaged
     kill_switch_engaged = True
     await ctx.send("☠️ Kill switch engaged. All bot activity halted.")
@@ -552,11 +565,8 @@ kill.shortcut = "k"
 
 @bot.hybrid_command(name="revive", description="Disengage the kill switch")
 async def revive(ctx):
-    if not (
-        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
-        ctx.author.id in ALLOWED_USER_IDS
-    ):
-        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    if not is_guild_admin(ctx):
+        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
     global kill_switch_engaged
     kill_switch_engaged = False
     await ctx.send("🩺 Kill switch disengaged. Bot is operational.")
@@ -569,11 +579,8 @@ revive.shortcut = "rv"
 
 @bot.hybrid_command(name="purify", description="Manual start for the purify cycle")
 async def purify(ctx):
-    if not (
-        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
-        ctx.author.id in ALLOWED_USER_IDS
-    ):
-        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    if not is_guild_admin(ctx):
+        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
     
     try:
         deleted = 0
@@ -595,7 +602,7 @@ async def purify(ctx):
         else:
             await ctx.send("❌ This channel is not marked for purification.", delete_after=5)
     except Exception as e:
-        await log_action(f"Error in !purify: {e}")
+        await log_action(f"Error in purify: {e}")
 
     try:
         await ctx.message.delete()
@@ -606,11 +613,8 @@ purify.shortcut = "pure"
 
 @bot.hybrid_command(name="startpurify", description="Begin the auto-purify cycle")
 async def startpurify(ctx):
-    if not (
-        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
-        ctx.author.id in ALLOWED_USER_IDS
-    ):
-        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    if not is_guild_admin(ctx):
+        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
     global auto_purify_enabled
     if not auto_purify.is_running():
         auto_purify.start()
@@ -625,11 +629,8 @@ startpurify.shortcut = "startp"
 
 @bot.hybrid_command(name="stoppurify", description="Stop the auto-purify cycle")
 async def stoppurify(ctx):
-    if not (
-        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
-        ctx.author.id in ALLOWED_USER_IDS
-    ):
-        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    if not is_guild_admin(ctx):
+        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
     global auto_purify_enabled
     if auto_purify.is_running():
         auto_purify.cancel()
@@ -644,11 +645,8 @@ stoppurify.shortcut = "stopp"
 
 @bot.hybrid_command(name="startstalk", description="Stalk a user through time and space")
 async def startstalk(ctx, target: discord.Member):
-    if not (
-        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
-        ctx.author.id in ALLOWED_USER_IDS
-    ):
-        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    if not is_guild_admin(ctx):
+        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
     stalked_user_ids.add(target.id)
     await log_action(f"Started stalking {target.display_name}.")
     await ctx.send(f"👀 Now stalking {target.display_name}", delete_after=5)
@@ -660,11 +658,8 @@ startstalk.shortcut = "stalk"
 
 @bot.hybrid_command(name="stopstalk", description="Release your target, they've suffered enough")
 async def stopstalk(ctx, target: discord.Member):
-    if not (
-        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
-        ctx.author.id in ALLOWED_USER_IDS
-    ):
-        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    if not is_guild_admin(ctx):
+        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
     stalked_user_ids.discard(target.id)
     await log_action(f"Stopped stalking {target.display_name}.")
     await ctx.send(f"🚫 No longer stalking {target.display_name}", delete_after=5)
@@ -676,11 +671,8 @@ stopstalk.shortcut = "unstalk"
         
 @bot.hybrid_command(name="initcache", description="Deep crawl to cache ALL messages in server history (fresh).")
 async def initcache(ctx):
-    if not (
-        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or
-        ctx.author.id in ALLOWED_USER_IDS
-    ):
-        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    if not is_guild_admin(ctx):
+        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
 
     await ctx.defer(ephemeral=False)
     await ctx.channel.send("🧠 Starting full deep cache of ALL server messages. This may take a while...")
@@ -736,11 +728,8 @@ async def initcache(ctx):
 
 @bot.hybrid_command(name="uwulock", description="heh.")
 async def uwulock(ctx, member: discord.Member):
-    if not (
-        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
-        ctx.author.id in ALLOWED_USER_IDS
-    ):
-        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    if not is_guild_admin(ctx):
+        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
 
     if member.id in uwulocked_user_ids:
         await ctx.send(f"🔒 **{member.display_name}** is already uwulocked.")
@@ -751,11 +740,8 @@ uwulock.shortcut = "uwu"
 
 @bot.hybrid_command(name="unlock", description="Lift the curse.")
 async def unlock(ctx, member: discord.Member):
-    if not (
-        any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles) or 
-        ctx.author.id in ALLOWED_USER_IDS
-    ):
-        return await ctx.send("❌ You don't have permission to use this command.", delete_after=5)
+    if not is_guild_admin(ctx):
+        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
 
     if member.id in uwulocked_user_ids:
         uwulocked_user_ids.remove(member.id)
@@ -764,6 +750,261 @@ async def unlock(ctx, member: discord.Member):
         await ctx.send(f"😇 **{member.display_name}** was not uwulocked.")
 unlock.shortcut = "unuwu"
 
+@bot.hybrid_command(
+    name="verifycache",
+    description="Verify cached message counts vs Discord history for this guild. (Admin only)"
+)
+@app_commands.describe(
+    find_missing="Set to true to sample messages and reveal some missing cached messages (slow).",
+    sample_per_channel="How many sample messages to check per channel when finding missing messages."
+)
+async def verifycache(ctx, find_missing: bool = False, sample_per_channel: int = 5):
+    if not is_guild_admin(ctx):
+        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
+
+    await ctx.defer(ephemeral=False)
+    guild = ctx.guild
+    if guild is None:
+        return await ctx.send("This command must be run in a guild (server).")
+
+    results = []
+    total_discord = 0
+    total_db = 0
+    channels_checked = 0
+    progress_interval = 5
+    long_report_lines = []
+
+    for channel in guild.text_channels:
+        if not channel.permissions_for(guild.me).read_message_history:
+            results.append(f"#{channel.name}: SKIPPED (no read_message_history permission)")
+            continue
+
+        channels_checked += 1
+        discord_count = 0
+        sample_messages = []
+        try:
+            async for message in channel.history(limit=None, oldest_first=True):
+                if message.author.bot or message.webhook_id is not None:
+                    continue
+                discord_count += 1
+                if find_missing and len(sample_messages) < sample_per_channel:
+                    sample_messages.append((message.id, message.author.display_name, message.created_at.isoformat(), (message.content or "")[:300]))
+        except Exception as e:
+            results.append(f"#{channel.name}: ERROR while reading history: {e}")
+            continue
+
+        cursor.execute("SELECT COUNT(*) FROM messages WHERE channel_id = ? AND guild_id = ?", (channel.id, guild.id))
+        try:
+            db_count = cursor.fetchone()[0]
+        except Exception:
+            db_count = 0
+
+        total_discord += discord_count
+        total_db += db_count
+
+        missing = max(0, discord_count - db_count)
+        pct_cached = (db_count / discord_count * 100) if discord_count > 0 else 100.0
+        results.append(f"#{channel.name}: Discord={discord_count:,}  DB={db_count:,}  Missing={missing:,}  Cached={pct_cached:.1f}%")
+
+        if find_missing and sample_messages:
+            for mid, author_name, ts, content_snip in sample_messages:
+                cursor.execute("SELECT 1 FROM messages WHERE message_id = ? AND guild_id = ? LIMIT 1", (mid, guild.id))
+                exists = cursor.fetchone() is not None
+                if not exists:
+                    long_report_lines.append(f"Missing in DB — channel=#{channel.name} author={author_name} ts={ts} msg_id={mid} content_snip={repr(content_snip)[:200]}")
+
+        if channels_checked % progress_interval == 0:
+            try:
+                await ctx.channel.send(f"🔁 Progress: checked {channels_checked} channels so far...")
+            except Exception:
+                pass
+
+    summary = [
+        f"✅ Verify cache complete for **{guild.name}**",
+        f"Channels checked: {channels_checked}",
+        f"Total Discord messages (non-bot): {total_discord:,}",
+        f"Total cached in DB: {total_db:,}",
+        f"Overall cached: {(total_db/total_discord*100) if total_discord>0 else 100.0:.1f}%"
+    ]
+    body_lines = summary + [""] + ["Per-channel summary:"] + results
+    if len(body_lines) > 200 or len("\n".join(results)) > 1500 or (find_missing and long_report_lines):
+        report_text = "\n".join(body_lines)
+        if find_missing and long_report_lines:
+            report_text += "\n\nSAMPLED MISSING MESSAGES:\n" + "\n".join(long_report_lines)
+        buffer = BytesIO(report_text.encode("utf-8"))
+        buffer.seek(0)
+        await ctx.send(file=discord.File(fp=buffer, filename=f"verifycache_{guild.id}.txt"))
+    else:
+        await ctx.send("```\n" + "\n".join(body_lines + ([""] + long_report_lines if long_report_lines else [])) + "\n```")
+
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
+
+# --- Retroactive migration command: backfill guild_id for rows where NULL ---
+@bot.hybrid_command(
+    name="backfill_guildids",
+    description="Retroactively assign guild_id for cached messages where missing. Admin only."
+)
+@app_commands.describe(
+    confirm="Set to true to actually perform the update. If false, the command will show what would be changed.",
+    fetch_unresolved="If true, attempt to fetch unresolved channel IDs from the Discord API (may be slow / rate-limited)."
+)
+async def backfill_guildids(ctx, confirm: bool = False, fetch_unresolved: bool = True):
+    """
+    Maps messages rows with guild_id IS NULL by using bot.get_channel(channel_id)
+    or, optionally, bot.fetch_channel(channel_id) for distinct channel_id present in the DB with NULL guild_id.
+    - If confirm is False: reports counts and which channel_ids are mappable.
+    - If confirm is True: performs UPDATE ... WHERE guild_id IS NULL AND channel_id = ?
+    Note: only channels the bot currently sees or can fetch will be backfilled.
+    """
+    if not is_guild_admin(ctx):
+        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=10)
+
+    await ctx.defer(ephemeral=False)
+
+    cursor.execute("SELECT COUNT(*) FROM messages WHERE guild_id IS NULL")
+    total_null = cursor.fetchone()[0]
+    if total_null == 0:
+        return await ctx.send("✅ No messages with NULL guild_id found. Nothing to backfill.")
+
+    # Get distinct channel IDs with missing guild_id
+    cursor.execute("SELECT DISTINCT channel_id FROM messages WHERE guild_id IS NULL")
+    rows = cursor.fetchall()
+    channel_ids = [r[0] for r in rows if r and r[0] is not None]
+
+    mappable = []
+    unmappable = []
+    total_mappable_rows = 0
+
+    # First pass: try to resolve from cache via bot.get_channel
+    for cid in channel_ids:
+        channel = bot.get_channel(cid)
+        if channel and getattr(channel, "guild", None):
+            guild_obj = channel.guild
+            count = cursor.execute("SELECT COUNT(*) FROM messages WHERE guild_id IS NULL AND channel_id = ?", (cid,)).fetchone()[0]
+            if count > 0:
+                mappable.append((cid, guild_obj.id, guild_obj.name, channel.name, count))
+                total_mappable_rows += count
+        else:
+            unmappable.append(cid)
+
+    fetched_mappable = []
+    fetch_errors = []
+    # Optionally attempt to fetch unresolved channels via API (for channels not in cache)
+    if unmappable and fetch_unresolved:
+        fetch_limit = 50  # safety limit to avoid extremely long runs; adjust if needed
+        fetched_attempts = 0
+        for cid in list(unmappable):  # iterate on a copy since we may modify unmappable
+            if fetched_attempts >= fetch_limit:
+                break
+            try:
+                # Attempt to fetch the channel from the API
+                ch = await bot.fetch_channel(cid)
+                if ch and getattr(ch, "guild", None):
+                    guild_obj = ch.guild
+                    count = cursor.execute("SELECT COUNT(*) FROM messages WHERE guild_id IS NULL AND channel_id = ?", (cid,)).fetchone()[0]
+                    if count > 0:
+                        fetched_mappable.append((cid, guild_obj.id, guild_obj.name, getattr(ch, "name", "unknown"), count))
+                else:
+                    fetch_errors.append((cid, "no guild info"))
+                # If fetch succeeded remove from unmappable
+                if cid in unmappable:
+                    unmappable.remove(cid)
+                fetched_attempts += 1
+            except discord.NotFound:
+                fetch_errors.append((cid, "NotFound"))
+            except discord.Forbidden:
+                fetch_errors.append((cid, "Forbidden"))
+            except discord.HTTPException as e:
+                fetch_errors.append((cid, f"HTTPException: {e}"))
+            except Exception as e:
+                fetch_errors.append((cid, f"Other: {e}"))
+            # be gentle with the API
+            await asyncio.sleep(0.2)
+
+    # accumulate totals including fetched
+    for cid, gid, gname, cname, cnt in fetched_mappable:
+        mappable.append((cid, gid, gname, cname, cnt))
+        total_mappable_rows += cnt
+
+    # Build report
+    report_lines = [
+        f"Total rows with NULL guild_id: {total_null}",
+        f"Distinct channel_ids with NULL guild_id: {len(channel_ids)}",
+        f"Channels that can be backfilled (bot can see or fetch): {len(mappable)} covering {total_mappable_rows} rows",
+        f"Channels that cannot be resolved by the bot (not visible): {len(unmappable)}",
+        ""
+    ]
+
+    for cid, gid, gname, cname, cnt in mappable:
+        report_lines.append(f"- channel_id={cid}  guild_id={gid} ({gname})  channel_name=#{cname}  rows={cnt}")
+
+    if unmappable:
+        report_lines.append("")
+        report_lines.append("Unmappable channel IDs (bot cannot resolve these):")
+        report_lines.extend([f"- {cid}" for cid in unmappable[:25]])
+        if len(unmappable) > 25:
+            report_lines.append(f"... and {len(unmappable)-25} more")
+
+    if fetch_errors:
+        report_lines.append("")
+        report_lines.append("Fetch attempts and errors (for unresolved channels):")
+        for cid, err in fetch_errors[:50]:
+            report_lines.append(f"- {cid}: {err}")
+        if len(fetch_errors) > 50:
+            report_lines.append(f"... and {len(fetch_errors)-50} more")
+
+    if not confirm:
+        report_lines.append("")
+        report_lines.append("No changes were made. Re-run the command with confirm=True to apply the updates.")
+        report_text = "\n".join(report_lines)
+        if len(report_text) > 1500:
+            buf = BytesIO(report_text.encode("utf-8"))
+            buf.seek(0)
+            await ctx.send(file=discord.File(fp=buf, filename=f"backfill_preview_{ctx.guild.id if ctx.guild else 'global'}.txt"))
+        else:
+            await ctx.send("```\n" + report_text + "\n```")
+        try:
+            await ctx.message.delete()
+        except Exception:
+            pass
+        return
+
+    # Confirm is True: perform updates for all mappable (including fetched)
+    updated_total = 0
+    updated_channels = 0
+    for cid, gid, gname, cname, cnt in mappable:
+        try:
+            cursor.execute("UPDATE messages SET guild_id = ? WHERE guild_id IS NULL AND channel_id = ?", (gid, cid))
+            updated = cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else cnt  # best-effort
+            if updated > 0:
+                updated_total += updated
+                updated_channels += 1
+        except Exception as e:
+            report_lines.append(f"Error updating channel_id {cid}: {e}")
+
+    db.commit()
+    remaining_null = cursor.execute("SELECT COUNT(*) FROM messages WHERE guild_id IS NULL").fetchone()[0]
+
+    report_lines.append("")
+    report_lines.append(f"Applied updates to {updated_channels} channels, {updated_total} rows updated.")
+    report_lines.append(f"Remaining rows with NULL guild_id: {remaining_null}")
+    report_text = "\n".join(report_lines)
+    if len(report_text) > 1500:
+        buf = BytesIO(report_text.encode("utf-8"))
+        buf.seek(0)
+        await ctx.send(file=discord.File(fp=buf, filename=f"backfill_result_{ctx.guild.id if ctx.guild else 'global'}.txt"))
+    else:
+        await ctx.send("```\n" + report_text + "\n```")
+
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
+
+# --- Remaining run ---
 if __name__ == "__main__":
     token = os.getenv("DISCORD_TOKEN")
     if not token or token.strip() == "" or token.strip().lower() == "none":
