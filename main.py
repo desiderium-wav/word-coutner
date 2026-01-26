@@ -2,6 +2,9 @@ import discord
 from discord.ext import commands, tasks
 import sqlite3
 import os
+import json
+import random
+import aiohttp
 import datetime
 import string
 from collections import Counter
@@ -91,6 +94,15 @@ uwulocked_user_ids = set()
 webhook_cache = {}
 
 bot = commands.Bot(command_prefix="s ", intents=intents)
+
+kms_media_path = "kms_media.json"
+try:
+    with open(kms_media_path, "r", encoding="utf-8") as f:
+        kms_data = json.load(f)
+        kms_media_list = kms_data.get("media", [])
+except Exception as e:
+    print(f"⚠️ Failed to load KMS media: {e}")
+    kms_media_list = []
 
 # Safely parse env variables (avoid ValueError on empty string)
 log_channel_id = None
@@ -801,6 +813,36 @@ async def unlock(ctx, member: discord.Member):
     else:
         await ctx.send(f"😇 **{member.display_name}** was not uwulocked.")
 unlock.shortcut = "unuwu"
+
+@bot.hybrid_command(
+    name="kms",
+    description="Post a random KMS media for fun."
+)
+@app_commands.describe()
+async def kms(ctx):
+    if not kms_media_list:
+        return await ctx.send("❌ No KMS media loaded.")
+
+    url = random.choice(kms_media_list)
+
+    # Attempt to fetch and post the media as a file (not just a link)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    return await ctx.send("❌ Failed to fetch media.")
+                data = await resp.read()
+                filename = url.split("/")[-1]
+                await ctx.send(file=discord.File(BytesIO(data), filename=filename))
+    except Exception as e:
+        await ctx.send(f"⚠️ Error posting media: {e}")
+
+# Add all shortcuts
+kms.shortcut = "killme"
+bot.add_command(commands.HybridCommand(kms, name="suicide"))
+bot.add_command(commands.HybridCommand(kms, name="hahahwhatif"))
+bot.add_command(commands.HybridCommand(kms, name="bruhimmakms"))
+bot.add_command(commands.HybridCommand(kms, name="welp"))
 
 @bot.hybrid_command(
     name="verifycache",
