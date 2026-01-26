@@ -47,6 +47,11 @@ if "guild_id" not in cols:
         print(f"⚠️ Could not add guild_id column: {e}")
 
 # --- Helpers and config loading ---
+def bootstrap():
+    init_gif_db()
+
+bootstrap()
+
 def load_stopwords(path="stopwords.txt"):
     try:
         with open(path, "r", encoding="utf-8") as file:
@@ -1097,11 +1102,6 @@ async def backfill_guildids(ctx, confirm: bool = False, fetch_unresolved: bool =
         await ctx.message.delete()
     except Exception:
         pass
-
-def bootstrap():
-    init_gif_db()
-
-bootstrap()
 
 # --- Remaining run ---
 if __name__ == "__main__":
