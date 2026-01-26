@@ -1008,6 +1008,11 @@ async def backfill_guildids(ctx, confirm: bool = False, fetch_unresolved: bool =
     except Exception:
         pass
 
+def bootstrap():
+    init_gif_db()
+
+bootstrap()
+
 # --- Remaining run ---
 if __name__ == "__main__":
     token = os.getenv("DISCORD_TOKEN")
