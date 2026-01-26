@@ -124,6 +124,35 @@ async def log_action(message):
             pass
     print(f"[LOG] {message}")
 
+async def handle_gif_query(message, query: str):
+    try:
+        # 1. Try local semantic search
+        result = await search_gifs(
+            query=query,
+            allow_nsfw=message.channel.is_nsfw()
+        )
+
+        # 2. If nothing found, search online (inside search_gifs)
+        if not result:
+            await message.channel.send("❌ No results found.")
+            return
+
+        # 3. Send media as embed or file
+        embed = discord.Embed()
+        embed.set_image(url=result["url"])
+        await message.channel.send(embed=embed)
+
+        # 4. Persist result for future queries
+        ingest_result(
+            query=query,
+            url=result["url"],
+            source=result["source"],
+            nsfw=result["nsfw"]
+        )
+
+    except Exception as e:
+        await log_action(f"GIF query error: {e}")
+
 # --- Purify helpers ---
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff")
 
@@ -140,6 +169,10 @@ def message_has_image_attachment(msg: discord.Message) -> bool:
     return False
 
 # --- Maintenance tasks and caching ---
+@tasks.loop(hours=12)
+async def gif_prune_task():
+    prune_dead_urls()
+
 @tasks.loop(minutes=120)
 async def auto_purify():
     # Iterate configured channel ids rather than scanning all guild channels to avoid permission problems
@@ -252,24 +285,32 @@ def generate_usage_graph(data_dict, title):
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user.name}")
+    
     try:
         synced = await bot.tree.sync()
         print(f"🔁 Synced {len(synced)} slash commands.")
     except Exception as e:
         print(f"⚠️ Failed to sync slash commands: {e}")
+   
     register_shortcuts()
+   
     if not background_cache.is_running():
         background_cache.start()
+   
+    if not gif_prune_task.is_running():
+        gif_prune_task.start()
+
 
 @bot.event
 async def on_message(message):
     if message.author.bot or message.webhook_id is not None:
         return
 
+    # Skip DMs if needed
     if message.guild is None:
         return
 
-    # Insert the message into DB (light-weight, ignores duplicates)
+    # --- Database insert ---
     try:
         cursor.execute(
             "INSERT OR IGNORE INTO messages (message_id, channel_id, author_id, content, timestamp, guild_id) VALUES (?, ?, ?, ?, ?, ?)",
@@ -279,16 +320,16 @@ async def on_message(message):
     except Exception:
         pass
 
+    # --- Uwu lock handling ---
     if message.author.id in uwulocked_user_ids:
         try:
             await message.delete()
-
             channel = message.channel
             if channel.id not in webhook_cache:
                 webhooks = await channel.webhooks()
                 webhook = discord.utils.get(webhooks, name="UwuFiend")
                 if webhook is None:
-                   webhook = await channel.create_webhook(name="UwuFiend")
+                    webhook = await channel.create_webhook(name="UwuFiend")
                 webhook_cache[channel.id] = webhook
             else:
                 webhook = webhook_cache[channel.id]
@@ -296,7 +337,6 @@ async def on_message(message):
             uwu_text = uwu.uwuify(message.content).strip()
             if len(uwu_text) > 2000:
                 uwu_text = uwu_text[:1997] + "..."
-
             await webhook.send(
                 content=uwu_text,
                 username=message.author.display_name,
@@ -304,28 +344,36 @@ async def on_message(message):
             )
         except Exception as e:
             print(f"[UWULOCK ERROR] Failed to uwuify message: {e}")
-  
+
+    # --- Stalked user handling ---
     if message.author.id in stalked_user_ids:
         try:
             await message.delete()
             await log_action(f"Deleted message from stalked user: {message.author.display_name}")
         except Exception as e:
             await log_action(f"Failed to delete stalked user message: {e}")
-        return 
+        return  # Stop further processing
 
+    # --- Shortcut command handling ---
     if message.content and message.content.lower().startswith("s "):
         parts = message.content[2:].split()
-        if not parts:
-            return
-        shortcut = parts[0].lower()
-        args = parts[1:]
-        if shortcut in SHORTCUTS:
-            command = bot.get_command(SHORTCUTS[shortcut])
-            if command:
-                ctx = await bot.get_context(message)
-                await ctx.invoke(command, *args)
-                return
+        if parts:
+            shortcut = parts[0].lower()
+            args = parts[1:]
+            if shortcut in SHORTCUTS:
+                command = bot.get_command(SHORTCUTS[shortcut])
+                if command:
+                    ctx = await bot.get_context(message)
+                    await ctx.invoke(command, *args)
+                    return
 
+    # --- GIF query handling ---
+    if message.content.startswith("//"):
+        query = message.content[2:].strip()
+        if query:
+            await handle_gif_query(message, query)
+
+    # Finally, process commands
     await bot.process_commands(message)
 
 # --- Counting & analysis commands (now guild-scoped) ---
