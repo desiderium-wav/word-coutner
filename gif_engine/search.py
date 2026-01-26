@@ -3,7 +3,13 @@ from .db import connect
 from .vectors import embed, similarity
 from .config import MAX_RESULTS, SIMILARITY_THRESHOLD
 
-def search(query: str, allow_nsfw: bool):
+async def search_gifs(query: str, allow_nsfw: bool):
+    """
+    Async compatibility function expected by main.py.
+
+    Returns a dict with keys: url, source, nsfw (bool) or None if nothing found.
+    Uses local semantic search first by comparing topic embeddings stored in DB.
+    """
     q_emb = embed(query)
 
     with connect() as db:
@@ -15,19 +21,25 @@ def search(query: str, allow_nsfw: bool):
         for tid, nsfw, emb in topics:
             if nsfw and not allow_nsfw:
                 continue
-            sim = similarity(emb, q_emb)
+            try:
+                sim = similarity(emb, q_emb)
+            except Exception:
+                continue
             if sim >= SIMILARITY_THRESHOLD:
-                scored.append((sim, tid))
+                scored.append((sim, tid, bool(nsfw)))
 
-        scored.sort(reverse=True)
-        results = []
+        # sort by similarity descending
+        scored.sort(reverse=True, key=lambda x: x[0])
 
-        for _, tid in scored[:MAX_RESULTS]:
+        candidates = []
+        # limit to top-N topics to avoid too many DB hits
+        for _, tid, nsfw_flag in scored[:MAX_RESULTS]:
             c.execute(
-                "SELECT url FROM media WHERE topic_id=? AND dead=0",
+                "SELECT url, source FROM media WHERE topic_id=? AND dead=0",
                 (tid,)
             )
-            urls = [r[0] for r in c.fetchall()]
-            results.extend(urls)
+            for url, source in c.fetchall():
+                if url:
+                    candidates.append({"url": url, "source": source, "nsfw": nsfw_flag})
 
-    return random.choice(results) if results else None
+    return random.choice(candidates) if candidates else None
