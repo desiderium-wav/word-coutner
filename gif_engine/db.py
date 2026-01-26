@@ -1,22 +1,44 @@
 import os
 import sqlite3
+import logging
 from .config import DB_PATH
 
+logger = logging.getLogger(__name__)
+
 def _ensure_db_dir():
-    # Ensure directory exists for DB_PATH (if path contains directories)
     dirpath = os.path.dirname(DB_PATH)
     if dirpath and not os.path.exists(dirpath):
         os.makedirs(dirpath, exist_ok=True)
+        logger.info("Created database directory %s", dirpath)
+
+def _apply_pragmas(conn: sqlite3.Connection):
+    # Improve concurrency for the gif DB
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+    except Exception as e:
+        logger.warning("Failed to set PRAGMA on DB: %s", e)
 
 def connect():
+    """
+    Returns a connection with row_factory set to sqlite3.Row for convenience.
+    """
     _ensure_db_dir()
-    return sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    _apply_pragmas(conn)
+    return conn
+
+def _column_exists(cursor, table, column):
+    cursor.execute("PRAGMA table_info(%s)" % table)
+    cols = [r[1] for r in cursor.fetchall()]
+    return column in cols
 
 def init_db():
     """
-    Initialize schema for gif database. This will attempt to create tables if
-    missing and perform a safe migration to add the `source` column to media
-    if an older DB exists.
+    Initialize schema for gif database and perform safe migrations:
+    - Ensure media table has columns: source, content_type, width, height
+    - Create helpful indexes
     """
     _ensure_db_dir()
     with connect() as db:
@@ -30,18 +52,20 @@ def init_db():
             embedding BLOB
         )""")
 
-        # Create media table if missing. We'll create with source column.
+        # Create media table with the expanded schema
         c.execute("""
         CREATE TABLE IF NOT EXISTS media (
             id INTEGER PRIMARY KEY,
             topic_id INTEGER,
             url TEXT UNIQUE,
             source TEXT,
+            content_type TEXT,
+            width INTEGER,
+            height INTEGER,
             last_verified INTEGER,
             dead INTEGER DEFAULT 0
         )""")
 
-        # Ensure queries table exists
         c.execute("""
         CREATE TABLE IF NOT EXISTS queries (
             id INTEGER PRIMARY KEY,
@@ -49,15 +73,35 @@ def init_db():
             query TEXT
         )""")
 
-        # Add indexes for faster lookups
+        # Indexes for performance
         c.execute("CREATE INDEX IF NOT EXISTS idx_media_topic ON media(topic_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_media_last_verified ON media(last_verified)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_queries_topic ON queries(topic_id)")
+
+        # Safe migrations for older DBs that may lack some columns.
+        # We'll check presence of each optional column and ALTER TABLE if missing.
+        # Note: SQLite's ALTER TABLE ADD COLUMN is safe for these simple additions.
+        try:
+            # target table is media
+            existing_cols = [r[1] for r in c.execute("PRAGMA table_info(media)").fetchall()]
+            needed = [
+                ("source", "TEXT"),
+                ("content_type", "TEXT"),
+                ("width", "INTEGER"),
+                ("height", "INTEGER")
+            ]
+            for col, coltype in needed:
+                if col not in existing_cols:
+                    sql = f"ALTER TABLE media ADD COLUMN {col} {coltype}"
+                    logger.info("Applying migration: %s", sql)
+                    c.execute(sql)
+        except Exception as e:
+            logger.exception("Migration step failed: %s", e)
 
         db.commit()
 
 def init_gif_db():
     """
-    Compatibility wrapper expected by main.py.
+    Compatibility wrapper expected by main.py (calls init_gif_db()).
     """
     init_db()
