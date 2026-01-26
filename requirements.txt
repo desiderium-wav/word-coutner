@@ -1,6 +1,9 @@
 discord.py>=2.3.2
 matplotlib>=3.5.0
-python-dotenv
-sentence-transformers
-numpy
-aiohttp
+python-dotenv>=1.0.0
+sentence-transformers>=2.2.2
+torch>=1.13.0
+numpy>=1.24.0
+aiohttp>=3.8.1
+uwuipy
+Pillow>=9.0.0
