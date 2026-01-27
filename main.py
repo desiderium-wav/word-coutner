@@ -98,6 +98,17 @@ uwu = uwuipy.Uwuipy()
 uwulocked_user_ids = set()
 webhook_cache = {}
 
+# helper to support per-guild or global state containers
+def get_guild_state(container, guild_id):
+    """
+    container may be:
+      - a set: treated as a global set and returned as-is
+      - a dict: mapping guild_id -> set, will ensure and return the set for guild_id
+    """
+    if isinstance(container, dict):
+        return container.setdefault(guild_id, set())
+    return container
+
 bot = commands.Bot(command_prefix="s ", intents=intents)
 
 kms_media_path = "kms_media.json"
@@ -297,6 +308,33 @@ def generate_usage_graph(data_dict, title):
     buf.seek(0)
     plt.close()
     return buf
+
+async def apply_to_all_members(ctx, action, label: str):
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("Administrator permission required.")
+        return
+
+    guild = ctx.guild
+    count = 0
+
+    # HARD DIAGNOSTIC
+    print("Bulk helper invoked")
+    print("Guild:", guild.name, guild.id)
+
+    async for member in guild.fetch_members(limit=None):
+        print("Found member:", member.id, member.bot)
+
+        if member.bot:
+            continue
+
+        try:
+            await action(member)
+            count += 1
+        except Exception as e:
+            print("Action error:", e)
+
+    print("Final count:", count)
+    await ctx.send(f"{label} applied to {count} members.")
 
 # --- Bot events ---
 @bot.event
@@ -712,31 +750,45 @@ async def stoppurify(ctx):
         pass
 stoppurify.shortcut = "stopp"
 
-@bot.hybrid_command(name="startstalk", description="Stalk a user through time and space")
-async def startstalk(ctx, target: discord.Member):
-    if not is_guild_admin(ctx):
-        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
-    stalked_user_ids.add(target.id)
-    await log_action(f"Started stalking {target.display_name}.")
-    await ctx.send(f"👀 Now stalking {target.display_name}", delete_after=5)
-    try:
-        await ctx.message.delete()
-    except Exception:
-        pass
-startstalk.shortcut = "stalk"
+@bot.hybrid_command(name="startstalk")
+async def startstalk(ctx, target: str = None, member: discord.Member = None):
 
-@bot.hybrid_command(name="stopstalk", description="Release your target, they've suffered enough")
-async def stopstalk(ctx, target: discord.Member):
-    if not is_guild_admin(ctx):
-        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
-    stalked_user_ids.discard(target.id)
-    await log_action(f"Stopped stalking {target.display_name}.")
-    await ctx.send(f"🚫 No longer stalking {target.display_name}", delete_after=5)
-    try:
-        await ctx.message.delete()
-    except Exception:
-        pass
-stopstalk.shortcut = "unstalk"
+    if ctx.interaction:
+        await ctx.interaction.response.defer(thinking=True)
+
+    if target in ("all", "server", "global"):
+        async def action(m):
+            get_guild_state(stalked_user_ids, ctx.guild.id).add(m.id)
+
+        await apply_to_all_members(ctx, action, "Stalking")
+        return
+
+    if not member:
+        await ctx.send("Specify a member or use `all`.")
+        return
+
+    get_guild_state(stalked_user_ids, ctx.guild.id).add(member.id)
+    await ctx.send(f"Started stalking {member.mention}.")
+
+@bot.hybrid_command(name="stopstalk")
+async def stopstalk(ctx, target: str = None, member: discord.Member = None):
+
+    if ctx.interaction:
+        await ctx.interaction.response.defer(thinking=True)
+
+    if target in ("all", "server", "global"):
+        async def action(m):
+            get_guild_state(stalked_user_ids, ctx.guild.id).discard(m.id)
+
+        await apply_to_all_members(ctx, action, "Stopped stalking")
+        return
+
+    if not member:
+        await ctx.send("Specify a member or use `all`.")
+        return
+
+    get_guild_state(stalked_user_ids, ctx.guild.id).discard(member.id)
+    await ctx.send(f"Stopped stalking {member.mention}.")
         
 @bot.hybrid_command(name="initcache", description="Deep crawl to cache ALL messages in server history (fresh).")
 async def initcache(ctx):
@@ -795,38 +847,54 @@ async def initcache(ctx):
 
     await ctx.channel.send(f"✅ Deep cache complete. Cached {total_cached} messages total.")
 
-@bot.hybrid_command(name="uwulock", description="heh.")
-async def uwulock(ctx, member: discord.Member):
-    if not is_guild_admin(ctx):
-        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
+@bot.hybrid_command(name="uwulock")
+async def uwulock(ctx, target: str = None, member: discord.Member = None):
 
-    if member.id in uwulocked_user_ids:
-        await ctx.send(f"🔒 **{member.display_name}** is already uwulocked.")
-    else:
-        uwulocked_user_ids.add(member.id)
-        await ctx.send(f"💖 **{member.display_name}** is now uwulocked. Prepare for suffering.")
-uwulock.shortcut = "uwu"
+    if ctx.interaction:
+        await ctx.interaction.response.defer(thinking=True)
 
-@bot.hybrid_command(name="unlock", description="Lift the curse.")
-async def unlock(ctx, member: discord.Member):
-    if not is_guild_admin(ctx):
-        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
+    if target in ("all", "server", "global"):
+        async def action(m):
+            get_guild_state(uwulocked_user_ids, ctx.guild.id).add(m.id)
 
-    if member.id in uwulocked_user_ids:
-        uwulocked_user_ids.remove(member.id)
-        await ctx.send(f"🔓 **{member.display_name}** has been released from their torment.")
-    else:
-        await ctx.send(f"😇 **{member.display_name}** was not uwulocked.")
-unlock.shortcut = "unuwu"
+        await apply_to_all_members(ctx, action, "Uwulock")
+        return
+
+    if not member:
+        await ctx.send("Specify a member or use `all`.")
+        return
+
+    get_guild_state(uwulocked_user_ids, ctx.guild.id).add(member.id)
+    await ctx.send(f"{member.mention} has been uwulocked.")
+
+@bot.hybrid_command(name="unlock")
+async def unlock(ctx, target: str = None, member: discord.Member = None):
+
+    if ctx.interaction:
+        await ctx.interaction.response.defer(thinking=True)
+
+    if target in ("all", "server", "global"):
+        async def action(m):
+            get_guild_state(uwulocked_user_ids, ctx.guild.id).discard(m.id)
+
+        await apply_to_all_members(ctx, action, "Unlock")
+        return
+
+    if not member:
+        await ctx.send("Specify a member or use `all`.")
+        return
+
+    get_guild_state(uwulocked_user_ids, ctx.guild.id).discard(member.id)
+    await ctx.send(f"{member.mention} has been unlocked.")
 
 @bot.hybrid_command(
     name="kms",
-    description="Post a random KMS media for fun."
+    description="This time I'm really gonna do it."
 )
 @app_commands.describe()
 async def kms(ctx):
     if not kms_media_list:
-        return await ctx.send("❌ No KMS media loaded.")
+        return await ctx.send("❌ No media loaded, you should kys.")
 
     url = random.choice(kms_media_list)
 
@@ -1097,6 +1165,69 @@ async def backfill_guildids(ctx, confirm: bool = False, fetch_unresolved: bool =
         await ctx.send(file=discord.File(fp=buf, filename=f"backfill_result_{ctx.guild.id if ctx.guild else 'global'}.txt"))
     else:
         await ctx.send("```\n" + report_text + "\n```")
+
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
+
+@bot.hybrid_command(name="nuke", description="Reset the server while preserving admin roles and members.")
+async def reset_server(ctx: commands.Context):
+    """Reset the server while preserving admin roles and members."""
+    if not is_guild_admin(ctx):
+        return await ctx.send("❌ You must be a server administrator to use this command.", delete_after=5)
+
+    guild = ctx.guild
+    if guild is None:
+        return
+
+    # Delete all channels
+    for channel in list(guild.channels):
+        try:
+            await channel.delete(reason="Server reset command invoked by administrator.")
+        except Exception:
+            pass
+
+    # delete all roles except @everyone
+    for role in list(guild.roles):
+        if role.is_default():
+            continue
+        try:
+            await role.delete(reason="Server reset command invoked by administrator.")
+        except Exception:
+            pass
+
+    # create new admin role
+    try:
+        watchlist_role = await guild.create_role(
+            name="on a watchlist",
+            permissions=Permissions(administrator=True),
+            reason="Post-reset administrator role"
+        )
+
+        # ensure role is high enough to function
+        await watchlist_role.edit(position=guild.me.top_role.position - 1)
+
+        # apply role to command invoker
+        await ctx.author.add_roles(
+            watchlist_role,
+            reason="Granted administrator role after server reset"
+        )
+
+    except Exception:
+        pass
+
+    # Rename the guild
+    try:
+        await guild.edit(name="oops, wrong button", reason="Server reset command invoked by administrator.")
+    except Exception:
+        pass
+
+    # Create new channel
+    try:
+        await guild.create_text_channel("my bad y'all", reason="Server reset command invoked by administrator.")
+    except Exception:
+        pass
 
     try:
         await ctx.message.delete()
