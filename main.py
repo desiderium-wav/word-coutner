@@ -14,10 +14,6 @@ import re
 from discord import app_commands
 import uwuipy
 import asyncio
-from gif_engine.db import init_gif_db
-from gif_engine.search import search_gifs
-from gif_engine.ingest import ingest_result
-from gif_engine.prune import prune_dead_urls
 
 # --- Database setup (with migration for guild_id) ---
 db = sqlite3.connect("wordcount.db", check_same_thread=False)
