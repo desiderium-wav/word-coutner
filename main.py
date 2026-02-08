@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands, tasks
 import sqlite3
+from dotenv import load_dotenv
 import os
 import json
 import random
@@ -89,6 +90,8 @@ stalked_user_ids = set()
 uwu = uwuipy.Uwuipy()
 uwulocked_user_ids = set()
 webhook_cache = {}
+load_dotenv()
+token = os.getenv("DISCORD_TOKEN")
 
 # helper to support per-guild or global state containers
 def get_guild_state(container, guild_id):
