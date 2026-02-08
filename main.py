@@ -43,10 +43,6 @@ if "guild_id" not in cols:
         print(f"⚠️ Could not add guild_id column: {e}")
 
 # --- Helpers and config loading ---
-def bootstrap():
-    init_gif_db()
-
-bootstrap()
 
 def load_stopwords(path="stopwords.txt"):
     try:
@@ -107,15 +103,6 @@ def get_guild_state(container, guild_id):
 
 bot = commands.Bot(command_prefix="s ", intents=intents)
 
-kms_media_path = "kms_media.json"
-try:
-    with open(kms_media_path, "r", encoding="utf-8") as f:
-        kms_data = json.load(f)
-        kms_media_list = kms_data.get("media", [])
-except Exception as e:
-    print(f"⚠️ Failed to load KMS media: {e}")
-    kms_media_list = []
-
 # Safely parse env variables (avoid ValueError on empty string)
 log_channel_id = None
 _raw_log_id = os.getenv("LOG_CHANNEL_ID")
@@ -148,35 +135,6 @@ async def log_action(message):
             pass
     print(f"[LOG] {message}")
 
-async def handle_gif_query(message, query: str):
-    try:
-        # 1. Try local semantic search
-        result = await search_gifs(
-            query=query,
-            allow_nsfw=message.channel.is_nsfw()
-        )
-
-        # 2. If nothing found, search online (inside search_gifs)
-        if not result:
-            await message.channel.send("❌ No results found.")
-            return
-
-        # 3. Send media as embed or file
-        embed = discord.Embed()
-        embed.set_image(url=result["url"])
-        await message.channel.send(embed=embed)
-
-        # 4. Persist result for future queries
-        ingest_result(
-            query=query,
-            url=result["url"],
-            source=result["source"],
-            nsfw=result["nsfw"]
-        )
-
-    except Exception as e:
-        await log_action(f"GIF query error: {e}")
-
 # --- Purify helpers ---
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff")
 
@@ -193,9 +151,6 @@ def message_has_image_attachment(msg: discord.Message) -> bool:
     return False
 
 # --- Maintenance tasks and caching ---
-@tasks.loop(hours=12)
-async def gif_prune_task():
-    prune_dead_urls()
 
 @tasks.loop(minutes=120)
 async def auto_purify():
@@ -347,9 +302,6 @@ async def on_ready():
    
     if not background_cache.is_running():
         background_cache.start()
-   
-    if not gif_prune_task.is_running():
-        gif_prune_task.start()
 
 
 @bot.event
@@ -417,12 +369,6 @@ async def on_message(message):
                     ctx = await bot.get_context(message)
                     await ctx.invoke(command, *args)
                     return
-
-    # --- GIF query handling ---
-    if message.content.startswith("//"):
-        query = message.content[2:].strip()
-        if query:
-            await handle_gif_query(message, query)
 
     # Finally, process commands
     await bot.process_commands(message)
@@ -882,36 +828,6 @@ async def unlock(ctx, target: str = None, member: discord.Member = None):
 
     get_guild_state(uwulocked_user_ids, ctx.guild.id).discard(member.id)
     await ctx.send(f"{member.mention} has been unlocked.")
-
-@bot.hybrid_command(
-    name="kms",
-    description="This time I'm really gonna do it."
-)
-@app_commands.describe()
-async def kms(ctx):
-    if not kms_media_list:
-        return await ctx.send("❌ No media loaded, you should kys.")
-
-    url = random.choice(kms_media_list)
-
-    # Attempt to fetch and post the media as a file (not just a link)
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    return await ctx.send("❌ Failed to fetch media.")
-                data = await resp.read()
-                filename = url.split("/")[-1]
-                await ctx.send(file=discord.File(BytesIO(data), filename=filename))
-    except Exception as e:
-        await ctx.send(f"⚠️ Error posting media: {e}")
-
-# Add all shortcuts
-kms.shortcut = "killme"
-bot.add_command(commands.HybridCommand(kms, name="suicide"))
-bot.add_command(commands.HybridCommand(kms, name="hahahwhatif"))
-bot.add_command(commands.HybridCommand(kms, name="bruhimmakms"))
-bot.add_command(commands.HybridCommand(kms, name="welp"))
 
 @bot.hybrid_command(
     name="verifycache",
